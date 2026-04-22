@@ -176,6 +176,10 @@ async function initDb() {
             if (!dbData.settings) dbData.settings = {};
             if (!dbData.test_history || typeof dbData.test_history !== 'object') dbData.test_history = {};
             if (!Array.isArray(dbData.last_targets)) dbData.last_targets = [];
+            dbData.saved_ips = dbData.saved_ips.map((item) => ({
+                ...item,
+                tag: typeof item.tag === 'string' ? item.tag : ''
+            }));
         } else {
             await fs.promises.writeFile(DB_FILE, JSON.stringify(dbData, null, 2));
         }
@@ -271,6 +275,7 @@ async function migrateLegacySavedIpsIfNeeded() {
                 speed: Number.isFinite(Number(item.speed)) ? Number(item.speed) : null,
                 csvColo: item.csvColo ? String(item.csvColo) : null,
                 region: item.region ? String(item.region) : null,
+                tag: typeof item.tag === 'string' ? item.tag : '',
                 created_at: Date.now()
             });
         }
@@ -307,10 +312,12 @@ app.post('/api/save-ips', async (req, res) => {
                     speed: Number.isFinite(Number(item.speed)) ? Number(item.speed) : null,
                     csvColo: item.csvColo ? String(item.csvColo) : null,
                     region: item.region ? String(item.region) : null,
+                    tag: typeof item.tag === 'string' ? String(item.tag).trim() : '',
                     created_at: Date.now()
                 });
                 added++;
             } else {
+                const incomingHasTag = typeof item.tag === 'string';
                 dbData.saved_ips[existingIdx] = {
                     ...dbData.saved_ips[existingIdx],
                     loss: Number.isFinite(Number(item.loss)) ? Number(item.loss) : dbData.saved_ips[existingIdx].loss,
@@ -318,6 +325,7 @@ app.post('/api/save-ips', async (req, res) => {
                     speed: Number.isFinite(Number(item.speed)) ? Number(item.speed) : dbData.saved_ips[existingIdx].speed,
                     csvColo: item.csvColo ? String(item.csvColo) : dbData.saved_ips[existingIdx].csvColo,
                     region: item.region ? String(item.region) : dbData.saved_ips[existingIdx].region,
+                    tag: incomingHasTag ? String(item.tag).trim() : (dbData.saved_ips[existingIdx].tag || ''),
                     updated_at: Date.now()
                 };
                 updated++;

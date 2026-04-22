@@ -345,6 +345,7 @@
                 <div class="action-btns">
                     <button id="copy-selected-btn" class="action-btn btn-copy" disabled>📋 复制</button>
                     <button id="save-selected-btn" class="action-btn btn-save" disabled>💾 收藏</button>
+                    <button id="tag-selected-btn" class="action-btn hidden" disabled>🏷️ 标签</button>
                     <button id="delete-selected-btn" class="action-btn btn-delete hidden" disabled>🗑️ 删除</button>
                 </div>
             </div>
@@ -358,12 +359,13 @@
                             <th>物理 IP (点击复制)</th>
                             <th class="text-center">延迟</th>
                             <th class="text-right" style="color: #4f46e5;">下载 (MB/s)</th>
+                            <th class="text-center">标签</th>
                             <th class="text-center">健康分</th>
                             <th class="text-center">趋势</th>
                         </tr>
                     </thead>
                     <tbody id="result-body">
-                        <tr id="empty-row"><td colspan="7" class="text-center text-slate-400" style="padding: 4rem 1rem;">准备就绪，点击底部按钮开始测速</td></tr>
+                        <tr id="empty-row"><td colspan="8" class="text-center text-slate-400" style="padding: 4rem 1rem;">准备就绪，点击底部按钮开始测速</td></tr>
                     </tbody>
                 </table>
             </div>

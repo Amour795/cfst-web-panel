@@ -29,6 +29,7 @@
         const actionBar = document.getElementById('action-bar');
         const selectAllCheckbox = document.getElementById('select-all');
         const saveSelectedBtn = document.getElementById('save-selected-btn');
+        const tagSelectedBtn = document.getElementById('tag-selected-btn');
         const deleteSelectedBtn = document.getElementById('delete-selected-btn');
         const copySelectedBtn = document.getElementById('copy-selected-btn');
         const selectedCountSpan = document.getElementById('selected-count');
@@ -71,6 +72,7 @@
         let progressPollTimer = null;
         let lastProgressPercent = 0;
         let regionHydrationSeq = 0;
+        const TABLE_COLSPAN = 8;
         const ipRegexGlobal = /(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)/g;
         const mixedRegex = /(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)|(?:[a-zA-Z0-9][-a-zA-Z0-9]{0,62}\.)+[a-zA-Z]{2,}/g;
 
@@ -219,6 +221,7 @@
                 bottomBar.classList.add('hide-down'); // 丝滑隐藏底部按钮
                 saveSelectedBtn.classList.remove('hidden');
                 saveSelectedBtn.innerText = '⚡ 测速选中';
+                tagSelectedBtn.classList.remove('hidden');
                 deleteSelectedBtn.classList.remove('hidden');
                 fetchAndRenderFavorites();
             } else if (view === 'settings') {
@@ -238,6 +241,7 @@
                 bottomBar.classList.remove('hide-down'); // 弹回底部按钮
                 saveSelectedBtn.classList.remove('hidden');
                 saveSelectedBtn.innerText = '💾 收藏';
+                tagSelectedBtn.classList.add('hidden');
                 deleteSelectedBtn.classList.add('hidden');
                 renderTable(currentTableData, '准备就绪，点击底部按钮开始测速');
             }
@@ -450,7 +454,7 @@
             resultBody.innerHTML = ''; selectAllCheckbox.checked = false; updateSelectionState();
             if (!dataArray || dataArray.length === 0) {
                 actionBar.classList.add('hidden');
-                resultBody.innerHTML = `<tr><td colspan="7" class="text-center text-slate-500" style="padding: 4rem 1rem;">${emptyMsg}</td></tr>`;
+                resultBody.innerHTML = `<tr><td colspan="${TABLE_COLSPAN}" class="text-center text-slate-500" style="padding: 4rem 1rem;">${emptyMsg}</td></tr>`;
                 return;
             }
             actionBar.classList.remove('hidden');
@@ -458,12 +462,13 @@
                 const tr = document.createElement('tr');
                 tr.innerHTML = `
                     <td class="text-center">
-                        <input type="checkbox" class="ip-checkbox" data-ip="${item.ip}" data-region="${item.region}" data-ping="${item.ping}" data-speed="${item.speed}">
+                        <input type="checkbox" class="ip-checkbox" data-ip="${item.ip}" data-region="${item.region || ''}" data-csvcolo="${item.csvColo || ''}" data-tag="${item.tag || ''}" data-ping="${item.ping}" data-speed="${item.speed}">
                     </td>
                     <td><span class="region-badge">${item.region || '❓ 未知'}</span></td>
                     <td><div class="copyable-ip font-mono text-slate-800" data-ip="${item.ip}">${item.ip}</div></td>
                     <td class="text-center text-slate-500">${Number(item.ping).toFixed(1)}ms</td>
                     <td class="text-right ${getSpeedClass(item.speed)}">${Number(item.speed).toFixed(2)}</td>
+                    <td class="text-center text-slate-500">${item.tag ? item.tag : '-'}</td>
                     <td class="text-center">${Number(item.healthScore || 0).toFixed(1)}</td>
                     <td class="text-center text-slate-500">${getTrendLabel(item.trend)}</td>
                 `;
@@ -522,6 +527,7 @@
             const hasSelection = checkedCount > 0;
             copySelectedBtn.disabled = !hasSelection;
             saveSelectedBtn.disabled = !hasSelection;
+            tagSelectedBtn.disabled = !hasSelection;
             deleteSelectedBtn.disabled = !hasSelection;
             selectAllCheckbox.checked = hasSelection && checkedCount === checkboxes.length;
         }
@@ -532,13 +538,51 @@
         });
         
         copySelectedBtn.addEventListener('click', () => {
-            const ips = Array.from(document.querySelectorAll('.ip-checkbox:checked')).map(cb => cb.dataset.ip).join('\n');
-            copyToClipboard(ips, `✅ 成功复制 ${document.querySelectorAll('.ip-checkbox:checked').length} 个 IP`);
+            const selected = Array.from(document.querySelectorAll('.ip-checkbox:checked'));
+            if (currentView === 'favorites') {
+                const lines = selected.map((cb) => {
+                    const ip = cb.dataset.ip || '';
+                    const code = String(cb.dataset.csvcolo || '').trim();
+                    const regionText = String(cb.dataset.region || '').replace(/[^\u4e00-\u9fa5A-Za-z0-9_-]/g, '');
+                    const region = code && code !== 'N/A' ? code : (regionText || 'UNKNOWN');
+                    const tag = String(cb.dataset.tag || '').trim() || '未标记';
+                    return `${ip}#${region}|${tag}`;
+                }).join('\n');
+                copyToClipboard(lines, `✅ 成功复制 ${selected.length} 个节点`);
+                return;
+            }
+            const ips = selected.map(cb => cb.dataset.ip).join('\n');
+            copyToClipboard(ips, `✅ 成功复制 ${selected.length} 个 IP`);
+        });
+
+        tagSelectedBtn.addEventListener('click', async () => {
+            if (currentView !== 'favorites') return;
+            const selected = Array.from(document.querySelectorAll('.ip-checkbox:checked'));
+            if (selected.length === 0) return showToast('❌ 请先选择节点');
+            const tag = prompt('请输入标签（留空则清除标签）', '');
+            if (tag === null) return;
+            const payload = selected.map((cb) => ({ ip: cb.dataset.ip, tag: String(tag).trim() }));
+            try {
+                const res = await fetch('/api/save-ips', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ips: payload })
+                });
+                const json = await res.json();
+                if (json.success) {
+                    showToast(`✅ 已为 ${selected.length} 个节点设置标签`);
+                    fetchAndRenderFavorites();
+                } else {
+                    showToast('❌ 标签保存失败');
+                }
+            } catch (e) {
+                showToast('❌ 标签保存失败');
+            }
         });
 
         // 收藏夹相关 API
         async function fetchAndRenderFavorites() {
-            resultBody.innerHTML = `<tr><td colspan="5" class="text-center" style="padding: 3rem;"><div class="spinner" style="margin: 0 auto;"></div></td></tr>`;
+            resultBody.innerHTML = `<tr><td colspan="${TABLE_COLSPAN}" class="text-center" style="padding: 3rem;"><div class="spinner" style="margin: 0 auto;"></div></td></tr>`;
             try {
                 const res = await fetch('/api/saved-ips'); const json = await res.json();
                 if (json.success) {
