@@ -16,9 +16,18 @@ REPO_URL="https://github.com/Amour795/cfst-web-panel.git"
 PROJECT_DIR="cfst-web-panel"
 MIN_NODE_VERSION=16
 
-echo -e "${BLUE}================================================${NC}"
-echo -e "${GREEN}  🚀 CF-SpeedTest 智能控制台 v2.1  ${NC}"
-echo -e "${BLUE}================================================${NC}"
+hr() { echo -e "${BLUE}================================================${NC}"; }
+title() { echo -e "${GREEN}$1${NC}"; }
+info() { echo -e "${CYAN}>>> $1${NC}"; }
+ok() { echo -e "${GREEN}✅ $1${NC}"; }
+warn() { echo -e "${YELLOW}⚠️  $1${NC}"; }
+fail() { echo -e "${RED}❌ $1${NC}"; }
+
+hr
+title "  🚀 CFST Web Panel 控制台 v2.2"
+title "  ─────────────────────────"
+echo -e "${CYAN} SQLite 持久化 · 黑夜模式${NC}"
+hr
 
 # --- 1. 核心模块：环境与架构嗅探 ---
 OS="$(uname -s)"
@@ -37,20 +46,21 @@ fi
 
 # --- 函数：智能检查并安装 Node.js ---
 check_and_install_node() {
-    echo -e "\n${CYAN}>>> 正在检查运行环境...${NC}"
+    info "正在检查运行环境..."
     
     # 安装基础工具包 (git, wget, tar)
     if $IS_TERMUX; then
         pkg update -y > /dev/null 2>&1
-        pkg install git wget tar -y > /dev/null 2>&1
+        pkg install git wget tar unzip -y > /dev/null 2>&1
     elif [ "$OS" == "Darwin" ]; then
         if ! command -v brew &> /dev/null; then echo -e "${RED}请先安装 Homebrew${NC}"; exit 1; fi
         if ! command -v wget &> /dev/null; then brew install wget; fi
+        if ! command -v unzip &> /dev/null; then brew install unzip; fi
     elif [ "$OS" == "Linux" ]; then
         if command -v apt-get &> /dev/null; then
-            sudo apt-get update > /dev/null 2>&1 && sudo apt-get install -y git wget tar > /dev/null 2>&1
+            sudo apt-get update > /dev/null 2>&1 && sudo apt-get install -y git wget tar unzip curl ca-certificates python3 make g++ > /dev/null 2>&1
         elif command -v yum &> /dev/null; then
-            sudo yum install -y git wget tar > /dev/null 2>&1
+            sudo yum install -y git wget tar unzip curl ca-certificates python3 make gcc-c++ > /dev/null 2>&1
         fi
     fi
 
@@ -59,13 +69,13 @@ check_and_install_node() {
         # 提取 Node 的大版本号
         NODE_VERSION=$(node -v | cut -d 'v' -f 2 | cut -d '.' -f 1)
         if [ -n "$NODE_VERSION" ] && [ "$NODE_VERSION" -ge "$MIN_NODE_VERSION" ]; then
-            echo -e "${GREEN}✅ 检测到合格的 Node.js (v$NODE_VERSION.x) 环境，跳过重复安装。${NC}"
+            ok "检测到合格的 Node.js (v$NODE_VERSION.x)，跳过重复安装"
             return 0
         else
-            echo -e "${YELLOW}⚠️ 当前 Node.js 版本 (v$NODE_VERSION) 偏低 (需 >= v$MIN_NODE_VERSION)，准备执行更新...${NC}"
+            warn "当前 Node.js 版本 (v$NODE_VERSION) 偏低 (需 >= v$MIN_NODE_VERSION)，准备执行更新"
         fi
     else
-        echo -e "${YELLOW}>>> 未检测到 Node.js，准备开始安装...${NC}"
+        warn "未检测到 Node.js，准备开始安装"
     fi
 
     # 执行 Node.js 安装
@@ -75,16 +85,18 @@ check_and_install_node() {
         brew install node
     elif [ "$OS" == "Linux" ]; then
         if command -v apt-get &> /dev/null; then
-            sudo apt-get install -y nodejs npm
+            curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash - > /dev/null 2>&1
+            sudo apt-get install -y nodejs > /dev/null 2>&1
         elif command -v yum &> /dev/null; then
-            sudo yum install -y nodejs npm
+            curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo bash - > /dev/null 2>&1
+            sudo yum install -y nodejs > /dev/null 2>&1
         fi
     fi
 }
 
 # --- 函数：更新/下载底层测速引擎 ---
 download_engine() {
-    echo -e "\n${CYAN}>>> 正在同步最新版 CloudflareST 底层引擎...${NC}"
+    info "正在同步最新版 CloudflareSpeedTest 底层引擎..."
     if [ "$OS" == "Darwin" ]; then
         if [ "$ARCH" == "arm64" ]; then
             ENGINE_URL="https://github.com/XIU2/CloudflareSpeedTest/releases/latest/download/cfst_darwin_arm64.zip"
@@ -102,28 +114,31 @@ download_engine() {
         wget -q -N "$ENGINE_URL" && tar -zxf $(basename "$ENGINE_URL") cfst ip.txt ipv6.txt && rm $(basename "$ENGINE_URL")
     fi
     chmod +x cfst
-    echo -e "${GREEN}✅ 底层引擎更新完毕！${NC}"
+    ok "底层引擎更新完毕"
 }
 
 # --- 函数：更新面板代码 ---
 update_code() {
-    echo -e "\n${CYAN}>>> 正在从 GitHub 拉取最新面板代码...${NC}"
+    info "正在从 GitHub 拉取最新面板代码..."
     git pull origin main
-    echo -e "${CYAN}>>> 正在检查并更新 Node.js 依赖...${NC}"
-    npm install
-    echo -e "${GREEN}✅ 代码与依赖更新完毕！${NC}"
+    info "正在检查并更新 Node.js 依赖..."
+    npm install --no-fund --no-audit
+    ok "代码与依赖更新完毕"
 }
 
 # --- 函数：启动服务 ---
 start_server() {
-    echo -e "\n${GREEN}🎉 准备就绪！正在启动中枢节点...${NC}"
-    echo -e "${BLUE}================================================${NC}"
+    hr
+    title "🎉 准备就绪！正在启动中枢节点..."
+    hr
     if $IS_TERMUX; then
         echo -e "👉 请在手机浏览器访问: ${GREEN}http://127.0.0.1:3088${NC}"
     else
         echo -e "👉 请在浏览器访问: ${GREEN}http://localhost:3088${NC}"
     fi
-    echo -e "${BLUE}================================================${NC}"
+    echo -e "👉 设置页：点击顶部 ${YELLOW}⚙️ 设置${NC}，可配置引擎参数与黑夜模式"
+    echo -e "👉 数据库：${YELLOW}database.sqlite${NC}（无需额外部署）"
+    hr
     node server.js
 }
 
@@ -131,7 +146,7 @@ start_server() {
 
 if [ -d "$PROJECT_DIR" ]; then
     # 已安装，进入管理菜单
-    echo -e "${YELLOW}检测到本地已部署 ${PROJECT_DIR} 项目。${NC}\n"
+    warn "检测到本地已部署 ${PROJECT_DIR} 项目"
     echo -e "请选择你需要执行的操作："
     echo -e "  ${GREEN}1.${NC} 启动测速面板 (直接运行)"
     echo -e "  ${GREEN}2.${NC} 仅更新 Web 面板代码 (Git Pull)"
@@ -174,19 +189,19 @@ if [ -d "$PROJECT_DIR" ]; then
 
 else
     # 未安装，执行全新安装逻辑
-    echo -e "${YELLOW}未检测到本地项目，准备开始全新安装...${NC}"
+    warn "未检测到本地项目，准备开始全新安装"
     
     # 智能环境配置
     check_and_install_node
 
-    echo -e "\n${CYAN}>>> 正在拉取项目代码...${NC}"
+    info "正在拉取项目代码..."
     git clone "$REPO_URL" "$PROJECT_DIR"
     cd "$PROJECT_DIR" || exit
 
     download_engine
 
-    echo -e "\n${CYAN}>>> 正在安装 Node.js 依赖...${NC}"
-    npm install express cors multer
+    info "正在安装 Node.js 依赖..."
+    npm install --no-fund --no-audit
 
     start_server
 fi
