@@ -12,7 +12,7 @@ CYAN='\033[1;36m'
 NC='\033[0m'
 
 # ⚠️ 请务必修改为你自己的 Git 仓库地址
-REPO_URL="https://github.com/你的用户名/你的仓库名.git"
+REPO_URL="https://github.com/Amour795/cfst-web-panel.git"
 PROJECT_DIR="cfst-web-panel"
 MIN_NODE_VERSION=16
 
