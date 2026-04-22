@@ -54,8 +54,6 @@
         const cfstAllip = document.getElementById('cfst-allip');
         const cfstDebug = document.getElementById('cfst-debug');
         const cfstTopNInput = document.getElementById('cfst-topn');
-        const performancePreset = document.getElementById('performance-preset');
-        const applyPresetBtn = document.getElementById('apply-preset-btn');
         const incrementalMode = document.getElementById('incremental-mode');
         const parseTimeoutInput = document.getElementById('parse-timeout');
         const totalTimeoutInput = document.getElementById('total-timeout');
@@ -97,12 +95,6 @@
             if (trend === 'down') return '⬇️ 下降';
             if (trend === 'stable') return '➡️ 稳定';
             return '🆕 新节点';
-        }
-        function getRuntimePerformanceMode() {
-            const preset = String(performancePreset && performancePreset.value ? performancePreset.value : 'custom');
-            if (preset === 'desktop_precision') return 'desktop';
-            if (preset === 'mobile_fast' || preset === 'mobile_balanced') return 'mobile';
-            return 'auto';
         }
         
         const THEME_KEY = 'cfst_theme_mode';
@@ -265,60 +257,7 @@
             }
         }
 
-        function applyPerformancePreset(presetKey) {
-            if (presetKey === 'mobile_fast') {
-                cfstMode.value = 'tcp';
-                cfstNInput.value = '48';
-                cfstTInput.value = '2';
-                cfstDtInput.value = '2';
-                cfstDnInput.value = '3';
-                cfstDnSingleInput.value = '1';
-                cfstTopNInput.value = '15';
-                cfstDisableDownload.checked = true;
-                cfstAllip.checked = false;
-                cfstDebug.checked = false;
-                parseTimeoutInput.value = '20';
-                totalTimeoutInput.value = '90';
-            } else if (presetKey === 'mobile_balanced') {
-                cfstMode.value = 'tcp';
-                cfstNInput.value = '64';
-                cfstTInput.value = '2';
-                cfstDtInput.value = '3';
-                cfstDnInput.value = '4';
-                cfstDnSingleInput.value = '1';
-                cfstTopNInput.value = '20';
-                cfstDisableDownload.checked = false;
-                cfstAllip.checked = false;
-                cfstDebug.checked = false;
-                parseTimeoutInput.value = '25';
-                totalTimeoutInput.value = '120';
-            } else if (presetKey === 'desktop_precision') {
-                cfstMode.value = 'tcp';
-                cfstNInput.value = '200';
-                cfstTInput.value = '4';
-                cfstDtInput.value = '5';
-                cfstDnInput.value = '10';
-                cfstDnSingleInput.value = '1';
-                cfstTopNInput.value = '50';
-                cfstDisableDownload.checked = false;
-                cfstAllip.checked = false;
-                cfstDebug.checked = false;
-                parseTimeoutInput.value = '35';
-                totalTimeoutInput.value = '180';
-            }
-            updateCfstModeVisibility();
-        }
-
         cfstMode.addEventListener('change', () => updateCfstModeVisibility());
-        applyPresetBtn.addEventListener('click', () => {
-            const key = performancePreset.value || 'mobile_balanced';
-            if (key === 'custom') {
-                showToast('ℹ️ 当前为自定义配置');
-                return;
-            }
-            applyPerformancePreset(key);
-            showToast('✅ 预设已应用，请点击“保存设置”');
-        });
 
         async function loadCfstConfig() {
             try {
@@ -344,7 +283,6 @@
                 cfstAllip.checked = Boolean(cfg.allip);
                 cfstDebug.checked = Boolean(cfg.debug);
                 cfstTopNInput.value = String(cfg.topN ?? '');
-                performancePreset.value = 'custom';
                 updateCfstModeVisibility();
             } catch (e) {}
         }
@@ -397,7 +335,6 @@
                     cfstAllip.checked = Boolean(cfg.allip);
                     cfstDebug.checked = Boolean(cfg.debug);
                     cfstTopNInput.value = String(cfg.topN ?? '');
-                    performancePreset.value = 'custom';
                     updateCfstModeVisibility();
                     showToast('✅ 设置已保存');
                 } else {
@@ -428,7 +365,6 @@
             cfstAllip.checked = false;
             cfstDebug.checked = false;
             cfstTopNInput.value = '50';
-            performancePreset.value = 'desktop_precision';
             saveCfstConfig();
         });
 
@@ -651,7 +587,7 @@
                                 incremental: false,
                                 parseTimeoutSec: Number(parseTimeoutInput.value || 25),
                                 totalTimeoutSec: Number(totalTimeoutInput.value || 150),
-                                performanceMode: getRuntimePerformanceMode(),
+                                performanceMode: 'manual',
                                 profile: /mobile/i.test(navigator.userAgent) ? 'mobile' : 'desktop'
                             }
                         })
@@ -740,7 +676,7 @@
                             incremental: incrementalMode.checked,
                             parseTimeoutSec: Number(parseTimeoutInput.value || 25),
                             totalTimeoutSec: Number(totalTimeoutInput.value || 150),
-                            performanceMode: getRuntimePerformanceMode(),
+                            performanceMode: 'manual',
                             profile: /mobile/i.test(navigator.userAgent) ? 'mobile' : 'desktop'
                         }
                     }) 
