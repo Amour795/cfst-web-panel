@@ -8,6 +8,7 @@ const http = require('http');
 const dns = require('dns').promises;
 const crypto = require('crypto');
 const sqlite3 = require('sqlite3').verbose();
+const sqlite3 = require('sqlite3').verbose();
 
 const app = express();
 const PORT = 3088; 
@@ -125,18 +126,9 @@ app.get('/api/progress/:taskId', (req, res) => {
 
 // --- 💾 数据库配置：持久化存储文件 ---
 const SQLITE_FILE = path.join(__dirname, 'database.sqlite');
-const LEGACY_JSON_FILE = path.join(__dirname, 'saved_ips.json');
 const db = new sqlite3.Database(SQLITE_FILE);
-
-function dbRun(sql, params = []) {
-    return new Promise((resolve, reject) => {
-        db.run(sql, params, function (err) {
-            if (err) return reject(err);
-            resolve(this);
-        });
     });
 }
-
 function dbGet(sql, params = []) {
     return new Promise((resolve, reject) => {
         db.get(sql, params, (err, row) => {
@@ -146,7 +138,6 @@ function dbGet(sql, params = []) {
     });
 }
 
-function dbAll(sql, params = []) {
     return new Promise((resolve, reject) => {
         db.all(sql, params, (err, rows) => {
             if (err) return reject(err);
@@ -156,7 +147,6 @@ function dbAll(sql, params = []) {
 }
 
 async function initDb() {
-    await dbRun('PRAGMA journal_mode = WAL');
     await dbRun('PRAGMA synchronous = NORMAL');
     await dbRun('PRAGMA foreign_keys = ON');
     await dbRun(`
@@ -189,46 +179,17 @@ async function setSetting(key, value) {
     await dbRun(
         'INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at',
         [key, value, now]
-    );
-}
-
-async function getCfstConfig() {
-    const defaults = {
-        n: 200,
-        t: 4,
-        tp: 443,
-        url: 'https://speed.cloudflare.com/__down?bytes=20000000',
-        mode: 'tcp',
-        httpingCode: 200,
-        cfcolo: '',
-        dt: 5,
-        dn: 10,
-        dnSingle: 1,
-        tl: 9999,
-        tll: 0,
-        tlr: 1,
         sl: 0,
-        disableDownload: false,
-        allip: false,
-        debug: false,
-        topN: 50
-    };
-    const raw = await getSetting('cfst_config');
-    if (!raw) return defaults;
+    const row = await dbGet('SELECT value FROM settings WHERE key = ?', [key]);
+    return row ? row.value : null;
     try {
         const parsed = JSON.parse(raw);
         const mode = parsed.mode === 'http' ? 'http' : 'tcp';
-        const cfcolo = typeof parsed.cfcolo === 'string' ? parsed.cfcolo.trim() : '';
-        const cfcoloNormalized = cfcolo && /^[A-Za-z]{2,5}(,[A-Za-z]{2,5})*$/.test(cfcolo) ? cfcolo : '';
-        const tlr = Number(parsed.tlr);
-        return {
-            n: Number.isFinite(Number(parsed.n)) ? Math.max(1, Math.min(1000, Number(parsed.n))) : defaults.n,
-            t: Number.isFinite(Number(parsed.t)) ? Math.max(1, Math.min(20, Number(parsed.t))) : defaults.t,
-            tp: Number.isFinite(Number(parsed.tp)) ? Math.max(1, Math.min(65535, Number(parsed.tp))) : defaults.tp,
-            url: typeof parsed.url === 'string' && parsed.url.trim() ? parsed.url.trim() : defaults.url,
-            mode,
-            httpingCode: Number.isFinite(Number(parsed.httpingCode)) ? Math.max(100, Math.min(599, Number(parsed.httpingCode))) : defaults.httpingCode,
-            cfcolo: cfcoloNormalized,
+    const now = Date.now();
+    await dbRun(
+        'INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at',
+        [key, value, now]
+    );
             dt: Number.isFinite(Number(parsed.dt)) ? Math.max(1, Math.min(30, Number(parsed.dt))) : defaults.dt,
             dn: Number.isFinite(Number(parsed.dn)) ? Math.max(1, Math.min(50, Number(parsed.dn))) : defaults.dn,
             dnSingle: Number.isFinite(Number(parsed.dnSingle)) ? Math.max(1, Math.min(10, Number(parsed.dnSingle))) : defaults.dnSingle,
@@ -286,7 +247,6 @@ async function migrateLegacySavedIpsIfNeeded() {
                     item.region ? String(item.region) : null,
                     Date.now()
                 ]
-            );
         }
         await dbRun('COMMIT');
     } catch (e) {
@@ -335,106 +295,44 @@ app.post('/api/save-ips', async (req, res) => {
         try { await dbRun('ROLLBACK'); } catch {}
         res.status(500).json({ success: false, msg: '保存收藏失败' });
     }
-});
-
-app.post('/api/delete-ips', async (req, res) => {
-    const ips = Array.isArray(req.body.ips) ? req.body.ips.map(s => String(s).trim()).filter(Boolean) : [];
-    if (ips.length === 0) return res.json({ success: true });
+app.get('/api/saved-ips', async (req, res) => {
     try {
-        const placeholders = ips.map(() => '?').join(',');
-        await dbRun(`DELETE FROM saved_ips WHERE ip IN (${placeholders})`, ips);
-        res.json({ success: true });
+        const rows = await dbAll('SELECT ip, loss, ping, speed, csvColo, region FROM saved_ips ORDER BY created_at DESC');
+        res.json({ success: true, data: rows });
     } catch (e) {
-        res.status(500).json({ success: false, msg: '删除收藏失败' });
+        res.status(500).json({ success: false, msg: '读取收藏失败' });
     }
 });
 
-app.get('/api/settings/cfst', async (req, res) => {
+app.post('/api/save-ips', async (req, res) => {
+    const newIps = Array.isArray(req.body.ips) ? req.body.ips : [];
+    if (newIps.length === 0) return res.json({ success: true, added: 0 });
+
+    let added = 0;
     try {
-        const cfg = await getCfstConfig();
-        res.json({ success: true, data: cfg });
-    } catch (e) {
         res.status(500).json({ success: false, msg: '读取设置失败' });
-    }
-});
-
-app.post('/api/settings/cfst', async (req, res) => {
-    const body = req.body || {};
-    const cfg = {
-        n: body.n,
-        t: body.t,
-        tp: body.tp,
-        url: typeof body.url === 'string' ? body.url.trim() : '',
-        mode: body.mode,
-        httpingCode: body.httpingCode,
-        cfcolo: typeof body.cfcolo === 'string' ? body.cfcolo.trim() : '',
-        dt: body.dt,
-        dn: body.dn,
-        dnSingle: body.dnSingle,
-        tl: body.tl,
-        tll: body.tll,
-        tlr: body.tlr,
-        sl: body.sl,
-        disableDownload: Boolean(body.disableDownload),
-        allip: Boolean(body.allip),
-        debug: Boolean(body.debug),
-        topN: body.topN
-    };
-    try {
-        await setSetting('cfst_config', JSON.stringify(cfg));
-        const normalized = await getCfstConfig();
-        res.json({ success: true, data: normalized });
-    } catch (e) {
-        res.status(500).json({ success: false, msg: '保存设置失败' });
-    }
-});
-
-// --- 以下为原有的测速与解析逻辑（保持不变） ---
-const cfColoMap = {
-    'HKG': '🇭🇰 香港', 'TPE': '🇹🇼 台北', 'NRT': '🇯🇵 东京', 'KIX': '🇯🇵 大阪',
-    'SGP': '🇸🇬 新加坡', 'ICN': '🇰🇷 首尔', 'LAX': '🇺🇸 洛杉矶', 'SJC': '🇺🇸 圣何塞',
-    'SEA': '🇺🇸 西雅图', 'FRA': '🇩🇪 法兰克福', 'LHR': '🇬🇧 伦敦', 'SYD': '🇦🇺 悉尼',
-    'CDG': '🇫🇷 巴黎', 'AMS': '🇳🇱 阿姆斯特丹', 'YYZ': '🇨🇦 多伦多', 'KUL': '🇲🇾 吉隆坡',
-    'BKK': '🇹🇭 曼谷', 'MNL': '🇵🇭 马尼拉', 'CGK': '🇮🇩 雅加达', 'BOM': '🇮🇳 孟买'
-};
-
-function getColo(ip) {
-    return new Promise((resolve) => {
-        const req = http.get(`http://${ip}/cdn-cgi/trace`, { timeout: 1500 }, (res) => {
-            let data = '';
-            res.on('data', chunk => data += chunk);
-            res.on('end', () => {
-                const match = data.match(/colo=([A-Z]+)/);
-                if (match && match[1]) resolve(cfColoMap[match[1]] || `🌐 ${match[1]}`);
-                else resolve('❓ 未知');
-            });
-        }).on('error', () => resolve('❓ 测速节点'))
-          .on('timeout', () => { req.destroy(); resolve('⏳ 超时'); });
-    });
-}
-
-const cfGlobalDnsServers = [
-    ['8.8.8.8', '8.8.4.4'], ['1.1.1.1', '1.0.0.1'], ['208.67.222.222', '208.67.220.220'],
-    ['9.9.9.9', '149.112.112.112'], ['119.29.29.29', '223.5.5.5']
-];
-
-async function resolveTargets(targets) {
-    const finalIps = new Set();
-    const domains = [];
-    const ipRegex = /^(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)$/;
-
-    targets.forEach(t => {
-        const trimmed = String(t || '').trim();
-        if (!trimmed) return;
-        if (ipRegex.test(trimmed)) finalIps.add(trimmed);
-        else domains.push(trimmed);
-    });
-
-    if (domains.length > 0) {
-        const promises = [];
-        domains.forEach(domain => {
-            cfGlobalDnsServers.forEach(servers => {
+        for (const item of newIps) {
+            if (!item || !item.ip) continue;
+            const ip = String(item.ip).trim();
+            if (!ip) continue;
+            const r = await dbRun(
+                'INSERT OR IGNORE INTO saved_ips (ip, loss, ping, speed, csvColo, region, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                [
+                    ip,
+                    Number.isFinite(Number(item.loss)) ? Number(item.loss) : null,
+                    Number.isFinite(Number(item.ping)) ? Number(item.ping) : null,
+                    Number.isFinite(Number(item.speed)) ? Number(item.speed) : null,
+                    item.csvColo ? String(item.csvColo) : null,
+                    item.region ? String(item.region) : null,
+                    Date.now()
+                ]
+            );
+            added += r.changes || 0;
+        }
+        await dbRun('COMMIT');
+        res.json({ success: true, added });
                 const resolver = new dns.Resolver();
+        try { await dbRun('ROLLBACK'); } catch {}
                 resolver.setServers(servers);
                 promises.push(resolver.resolve4(domain).catch(() => { return []; }));
             });
@@ -443,7 +341,8 @@ async function resolveTargets(targets) {
         results.forEach(records => records.forEach(ip => finalIps.add(ip)));
     }
     return Array.from(finalIps);
-}
+        const placeholders = ips.map(() => '?').join(',');
+        await dbRun(`DELETE FROM saved_ips WHERE ip IN (${placeholders})`, ips);
 
 app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
     req.setTimeout(300000); 

@@ -52,7 +52,6 @@ check_and_install_node() {
     if $IS_TERMUX; then
         pkg update -y > /dev/null 2>&1
         pkg install git wget tar unzip -y > /dev/null 2>&1
-    elif [ "$OS" == "Darwin" ]; then
         if ! command -v brew &> /dev/null; then echo -e "${RED}请先安装 Homebrew${NC}"; exit 1; fi
         if ! command -v wget &> /dev/null; then brew install wget; fi
         if ! command -v unzip &> /dev/null; then brew install unzip; fi
@@ -81,11 +80,7 @@ check_and_install_node() {
     # 执行 Node.js 安装
     if $IS_TERMUX; then
         pkg install nodejs -y
-    elif [ "$OS" == "Darwin" ]; then
-        brew install node
-    elif [ "$OS" == "Linux" ]; then
-        if command -v apt-get &> /dev/null; then
-            curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash - > /dev/null 2>&1
+        pkg install nodejs -y
             sudo apt-get install -y nodejs > /dev/null 2>&1
         elif command -v yum &> /dev/null; then
             curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo bash - > /dev/null 2>&1
@@ -128,9 +123,6 @@ update_code() {
 
 # --- 函数：启动服务 ---
 start_server() {
-    hr
-    title "🎉 准备就绪！正在启动中枢节点..."
-    hr
     if $IS_TERMUX; then
         echo -e "👉 请在手机浏览器访问: ${GREEN}http://127.0.0.1:3088${NC}"
     else
@@ -145,7 +137,7 @@ start_server() {
 # --- 2. 交互式主逻辑 ---
 
 if [ -d "$PROJECT_DIR" ]; then
-    # 已安装，进入管理菜单
+    echo -e "👉 数据库：${YELLOW}database.sqlite${NC}（无需额外部署）"
     warn "检测到本地已部署 ${PROJECT_DIR} 项目"
     echo -e "请选择你需要执行的操作："
     echo -e "  ${GREEN}1.${NC} 启动测速面板 (直接运行)"

@@ -49,19 +49,6 @@ node server.js
 
 默认端口为 `3088`。
 
-## API
-
-- `POST /api/start-test`
-  - 说明：启动测速（支持 JSON 或文件上传）
-  - JSON Body：`{ "targetIps": ["ip_or_domain", "..."] }`
-- 返回：`{ success: true, data: topN[] }`
-- `GET /api/progress/:taskId`
-  - 说明：订阅实时进度（SSE）
-- `GET /api/saved-ips`
-  - 说明：获取收藏列表
-- `POST /api/save-ips`
-  - 说明：批量收藏（自动去重）
-  - Body：`{ ips: [{ ip, region, ping, speed }, ...] }`
 - `POST /api/delete-ips`
   - 说明：批量删除收藏
   - Body：`{ ips: ["1.1.1.1", ...] }`

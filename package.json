@@ -4,6 +4,7 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "preinstall": "node termux-setup.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
