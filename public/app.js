@@ -98,6 +98,12 @@
             if (trend === 'stable') return '➡️ 稳定';
             return '🆕 新节点';
         }
+        function getRuntimePerformanceMode() {
+            const preset = String(performancePreset && performancePreset.value ? performancePreset.value : 'custom');
+            if (preset === 'desktop_precision') return 'desktop';
+            if (preset === 'mobile_fast' || preset === 'mobile_balanced') return 'mobile';
+            return 'auto';
+        }
         
         const THEME_KEY = 'cfst_theme_mode';
         const systemDarkMql = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
@@ -645,7 +651,7 @@
                                 incremental: false,
                                 parseTimeoutSec: Number(parseTimeoutInput.value || 25),
                                 totalTimeoutSec: Number(totalTimeoutInput.value || 150),
-                                performanceMode: /mobile/i.test(navigator.userAgent) ? 'mobile' : 'auto',
+                                performanceMode: getRuntimePerformanceMode(),
                                 profile: /mobile/i.test(navigator.userAgent) ? 'mobile' : 'desktop'
                             }
                         })
@@ -734,7 +740,7 @@
                             incremental: incrementalMode.checked,
                             parseTimeoutSec: Number(parseTimeoutInput.value || 25),
                             totalTimeoutSec: Number(totalTimeoutInput.value || 150),
-                            performanceMode: /mobile/i.test(navigator.userAgent) ? 'mobile' : 'auto',
+                            performanceMode: getRuntimePerformanceMode(),
                             profile: /mobile/i.test(navigator.userAgent) ? 'mobile' : 'desktop'
                         }
                     }) 
