@@ -1,116 +1,192 @@
 #!/bin/bash
 
 # ==========================================
-# CF-SpeedTest-Web 全平台智能一键部署脚本
+# CF-SpeedTest-Web 全平台智能部署与管理中枢
 # ==========================================
 
 GREEN='\033[1;32m'
 YELLOW='\033[1;33m'
 RED='\033[1;31m'
 BLUE='\033[1;34m'
+CYAN='\033[1;36m'
 NC='\033[0m'
 
-echo -e "${BLUE}================================================${NC}"
-echo -e "${GREEN}  🚀 欢迎使用 CF-SpeedTest 全平台智能部署中枢  ${NC}"
-echo -e "${BLUE}================================================${NC}"
-echo ""
+# ⚠️ 请务必修改为你自己的 Git 仓库地址
+REPO_URL="https://github.com/你的用户名/你的仓库名.git"
+PROJECT_DIR="cfst-web-panel"
+MIN_NODE_VERSION=16
 
-# 1. 核心模块：智能系统与 CPU 架构探针
+echo -e "${BLUE}================================================${NC}"
+echo -e "${GREEN}  🚀 CF-SpeedTest 智能控制台 v2.1  ${NC}"
+echo -e "${BLUE}================================================${NC}"
+
+# --- 1. 核心模块：环境与架构嗅探 ---
 OS="$(uname -s)"
 ARCH="$(uname -m)"
 IS_TERMUX=false
 
-echo -e "${YELLOW}[1/5] 正在执行系统环境级嗅探...${NC}"
-
 if [ -n "$TERMUX_VERSION" ]; then
     OS="Android"
     IS_TERMUX=true
-    echo -e "✅ 识别到设备: ${GREEN}Android 手机 (Termux 极客环境)${NC}"
 elif [ "$OS" == "Darwin" ]; then
-    # 区分 Mac 和 iOS 终端 (如 a-Shell)
     if [[ "$ARCH" == *"iPhone"* || "$ARCH" == *"iPad"* ]]; then
-        echo -e "❌ 识别到设备: ${RED}Apple iOS / iPadOS${NC}"
-        echo -e "${YELLOW}⚠️ 架构受限：苹果沙盒机制严禁运行底层并发网络引擎和本地 Node 服务器。${NC}"
-        echo -e "${YELLOW}💡 解决方案：请将本系统部署在 Mac 或云服务器上，用 iPhone 浏览器访问即可。${NC}"
+        echo -e "${RED}❌ 不支持在 iOS 本地直接运行，请部署在服务器或 Mac 上。${NC}"
         exit 1
+    fi
+fi
+
+# --- 函数：智能检查并安装 Node.js ---
+check_and_install_node() {
+    echo -e "\n${CYAN}>>> 正在检查运行环境...${NC}"
+    
+    # 安装基础工具包 (git, wget, tar)
+    if $IS_TERMUX; then
+        pkg update -y > /dev/null 2>&1
+        pkg install git wget tar -y > /dev/null 2>&1
+    elif [ "$OS" == "Darwin" ]; then
+        if ! command -v brew &> /dev/null; then echo -e "${RED}请先安装 Homebrew${NC}"; exit 1; fi
+        if ! command -v wget &> /dev/null; then brew install wget; fi
+    elif [ "$OS" == "Linux" ]; then
+        if command -v apt-get &> /dev/null; then
+            sudo apt-get update > /dev/null 2>&1 && sudo apt-get install -y git wget tar > /dev/null 2>&1
+        elif command -v yum &> /dev/null; then
+            sudo yum install -y git wget tar > /dev/null 2>&1
+        fi
+    fi
+
+    # 智能判断 Node.js 环境
+    if command -v node >/dev/null 2>&1; then
+        # 提取 Node 的大版本号
+        NODE_VERSION=$(node -v | cut -d 'v' -f 2 | cut -d '.' -f 1)
+        if [ -n "$NODE_VERSION" ] && [ "$NODE_VERSION" -ge "$MIN_NODE_VERSION" ]; then
+            echo -e "${GREEN}✅ 检测到合格的 Node.js (v$NODE_VERSION.x) 环境，跳过重复安装。${NC}"
+            return 0
+        else
+            echo -e "${YELLOW}⚠️ 当前 Node.js 版本 (v$NODE_VERSION) 偏低 (需 >= v$MIN_NODE_VERSION)，准备执行更新...${NC}"
+        fi
     else
-        echo -e "✅ 识别到设备: ${GREEN}Apple macOS 桌面级系统${NC}"
+        echo -e "${YELLOW}>>> 未检测到 Node.js，准备开始安装...${NC}"
     fi
-elif [ "$OS" == "Linux" ]; then
-    echo -e "✅ 识别到设备: ${GREEN}Linux 服务器/主机${NC}"
-else
-    echo -e "${RED}❌ 未知或不支持的操作系统: $OS${NC}"
-    exit 1
-fi
 
-echo -e "✅ 识别到 CPU 架构: ${GREEN}$ARCH${NC}"
-
-# 2. 环境依赖安装
-echo -e "\n${YELLOW}[2/5] 正在配置系统级依赖...${NC}"
-if $IS_TERMUX; then
-    pkg update -y && pkg install nodejs git wget tar -y
-elif [ "$OS" == "Darwin" ]; then
-    if ! command -v brew &> /dev/null; then
-        echo -e "${RED}未检测到 Homebrew，请先安装 Homebrew！${NC}"
-        exit 1
+    # 执行 Node.js 安装
+    if $IS_TERMUX; then
+        pkg install nodejs -y
+    elif [ "$OS" == "Darwin" ]; then
+        brew install node
+    elif [ "$OS" == "Linux" ]; then
+        if command -v apt-get &> /dev/null; then
+            sudo apt-get install -y nodejs npm
+        elif command -v yum &> /dev/null; then
+            sudo yum install -y nodejs npm
+        fi
     fi
-    brew install node wget
-elif [ "$OS" == "Linux" ]; then
-    # 兼容 Ubuntu/Debian 和 CentOS
-    if command -v apt-get &> /dev/null; then
-        sudo apt-get update && sudo apt-get install -y nodejs npm git wget tar
-    elif command -v yum &> /dev/null; then
-        sudo yum install -y nodejs npm git wget tar
-    fi
-fi
+}
 
-# 3. 拉取项目代码
-echo -e "\n${YELLOW}[3/5] 正在拉取核心控制台代码...${NC}"
-REPO_URL="https://github.com/你的用户名/你的仓库名.git"
-PROJECT_DIR="cfst-web-panel"
+# --- 函数：更新/下载底层测速引擎 ---
+download_engine() {
+    echo -e "\n${CYAN}>>> 正在同步最新版 CloudflareST 底层引擎...${NC}"
+    if [ "$OS" == "Darwin" ]; then
+        if [ "$ARCH" == "arm64" ]; then
+            ENGINE_URL="https://github.com/XIU2/CloudflareSpeedTest/releases/latest/download/cfst_darwin_arm64.zip"
+            wget -q -N "$ENGINE_URL" && unzip -q -o cfst_darwin_arm64.zip cfst ip.txt ipv6.txt && rm cfst_darwin_arm64.zip
+        else
+            ENGINE_URL="https://github.com/XIU2/CloudflareSpeedTest/releases/latest/download/cfst_darwin_amd64.zip"
+            wget -q -N "$ENGINE_URL" && unzip -q -o cfst_darwin_amd64.zip cfst ip.txt ipv6.txt && rm cfst_darwin_amd64.zip
+        fi
+    elif [ "$OS" == "Android" ] || [ "$OS" == "Linux" ]; then
+        if [[ "$ARCH" == *"aarch64"* || "$ARCH" == *"arm64"* ]]; then
+            ENGINE_URL="https://github.com/XIU2/CloudflareSpeedTest/releases/latest/download/cfst_linux_arm64.tar.gz"
+        else
+            ENGINE_URL="https://github.com/XIU2/CloudflareSpeedTest/releases/latest/download/cfst_linux_amd64.tar.gz"
+        fi
+        wget -q -N "$ENGINE_URL" && tar -zxf $(basename "$ENGINE_URL") cfst ip.txt ipv6.txt && rm $(basename "$ENGINE_URL")
+    fi
+    chmod +x cfst
+    echo -e "${GREEN}✅ 底层引擎更新完毕！${NC}"
+}
+
+# --- 函数：更新面板代码 ---
+update_code() {
+    echo -e "\n${CYAN}>>> 正在从 GitHub 拉取最新面板代码...${NC}"
+    git pull origin main
+    echo -e "${CYAN}>>> 正在检查并更新 Node.js 依赖...${NC}"
+    npm install
+    echo -e "${GREEN}✅ 代码与依赖更新完毕！${NC}"
+}
+
+# --- 函数：启动服务 ---
+start_server() {
+    echo -e "\n${GREEN}🎉 准备就绪！正在启动中枢节点...${NC}"
+    echo -e "${BLUE}================================================${NC}"
+    if $IS_TERMUX; then
+        echo -e "👉 请在手机浏览器访问: ${GREEN}http://127.0.0.1:3088${NC}"
+    else
+        echo -e "👉 请在浏览器访问: ${GREEN}http://localhost:3088${NC}"
+    fi
+    echo -e "${BLUE}================================================${NC}"
+    node server.js
+}
+
+# --- 2. 交互式主逻辑 ---
 
 if [ -d "$PROJECT_DIR" ]; then
-    rm -rf "$PROJECT_DIR"
-fi
-git clone "$REPO_URL" "$PROJECT_DIR"
-cd "$PROJECT_DIR" || exit
+    # 已安装，进入管理菜单
+    echo -e "${YELLOW}检测到本地已部署 ${PROJECT_DIR} 项目。${NC}\n"
+    echo -e "请选择你需要执行的操作："
+    echo -e "  ${GREEN}1.${NC} 启动测速面板 (直接运行)"
+    echo -e "  ${GREEN}2.${NC} 仅更新 Web 面板代码 (Git Pull)"
+    echo -e "  ${GREEN}3.${NC} 仅更新底层 C++ 测速引擎 (从官方源下载最新版)"
+    echo -e "  ${GREEN}4.${NC} 全面更新 (更新代码 + 引擎) 并启动"
+    echo -e "  ${RED}0.${NC} 退出脚本"
+    echo ""
+    read -p "请输入序号 [0-4]: " choice
 
-# 4. 智能匹配底层 C++ 引擎
-echo -e "\n${YELLOW}[4/5] 正在根据 CPU 架构下载匹配的测速引擎...${NC}"
-if [ "$OS" == "Darwin" ]; then
-    if [ "$ARCH" == "arm64" ]; then
-        # M1/M2/M3 芯片 Mac
-        ENGINE_URL="https://github.com/XIU2/CloudflareSpeedTest/releases/latest/download/cfst_darwin_arm64.zip"
-        wget -N "$ENGINE_URL" && unzip -o cfst_darwin_arm64.zip cfst ip.txt ipv6.txt && rm cfst_darwin_arm64.zip
-    else
-        # Intel 芯片 Mac
-        ENGINE_URL="https://github.com/XIU2/CloudflareSpeedTest/releases/latest/download/cfst_darwin_amd64.zip"
-        wget -N "$ENGINE_URL" && unzip -o cfst_darwin_amd64.zip cfst ip.txt ipv6.txt && rm cfst_darwin_amd64.zip
-    fi
-elif [ "$OS" == "Android" ] || [ "$OS" == "Linux" ]; then
-    if [[ "$ARCH" == *"aarch64"* || "$ARCH" == *"arm64"* ]]; then
-        # 手机 ARM 或 ARM 服务器
-        ENGINE_URL="https://github.com/XIU2/CloudflareSpeedTest/releases/latest/download/cfst_linux_arm64.tar.gz"
-    else
-        # 普通 Linux 服务器
-        ENGINE_URL="https://github.com/XIU2/CloudflareSpeedTest/releases/latest/download/cfst_linux_amd64.tar.gz"
-    fi
-    wget -N "$ENGINE_URL" && tar -zxf $(basename "$ENGINE_URL") cfst ip.txt ipv6.txt && rm $(basename "$ENGINE_URL")
-fi
+    cd "$PROJECT_DIR" || exit
+    # 每次跑菜单也顺便检查一下 Node 环境是不是被别人卸载了
+    check_and_install_node
 
-chmod +x cfst
+    case $choice in
+        1)
+            start_server
+            ;;
+        2)
+            update_code
+            start_server
+            ;;
+        3)
+            download_engine
+            start_server
+            ;;
+        4)
+            update_code
+            download_engine
+            start_server
+            ;;
+        0)
+            echo -e "${YELLOW}已退出。${NC}"
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}输入无效，默认直接启动面板...${NC}"
+            start_server
+            ;;
+    esac
 
-# 5. Node 依赖与启动
-echo -e "\n${YELLOW}[5/5] 正在编译后端中枢节点...${NC}"
-npm install express cors multer
-
-echo -e "\n${GREEN}🎉 全平台统一部署完成！正在启动中枢...${NC}"
-echo -e "${BLUE}================================================${NC}"
-if $IS_TERMUX; then
-    echo -e "👉 请在手机浏览器访问: ${GREEN}http://127.0.0.1:3088${NC}"
 else
-    echo -e "👉 请在浏览器访问: ${GREEN}http://localhost:3088${NC}"
-fi
-echo -e "${BLUE}================================================${NC}"
+    # 未安装，执行全新安装逻辑
+    echo -e "${YELLOW}未检测到本地项目，准备开始全新安装...${NC}"
+    
+    # 智能环境配置
+    check_and_install_node
 
-node server.js
+    echo -e "\n${CYAN}>>> 正在拉取项目代码...${NC}"
+    git clone "$REPO_URL" "$PROJECT_DIR"
+    cd "$PROJECT_DIR" || exit
+
+    download_engine
+
+    echo -e "\n${CYAN}>>> 正在安装 Node.js 依赖...${NC}"
+    npm install express cors multer
+
+    start_server
+fi
