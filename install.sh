@@ -52,6 +52,7 @@ check_and_install_node() {
     if $IS_TERMUX; then
         pkg update -y > /dev/null 2>&1
         pkg install git wget tar unzip -y > /dev/null 2>&1
+    elif [ "$OS" == "Darwin" ]; then
         if ! command -v brew &> /dev/null; then echo -e "${RED}请先安装 Homebrew${NC}"; exit 1; fi
         if ! command -v wget &> /dev/null; then brew install wget; fi
         if ! command -v unzip &> /dev/null; then brew install unzip; fi
