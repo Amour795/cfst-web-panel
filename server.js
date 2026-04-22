@@ -22,6 +22,7 @@ const progressClients = new Map();
 const lastProgress = new Map();
 const taskPhase = new Map();
 const lastProgressKey = new Map();
+const coloCache = new Map();
 
 function normalizeProgress(taskId, payload) {
     const knownPhase = taskPhase.get(taskId);
@@ -322,6 +323,24 @@ app.post('/api/settings/cfst', async (req, res) => {
     }
 });
 
+app.post('/api/regions', async (req, res) => {
+    const ipRegex = /^(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)$/;
+    const ips = Array.isArray(req.body?.ips)
+        ? [...new Set(req.body.ips.map(s => String(s || '').trim()).filter(ip => ipRegex.test(ip)))]
+        : [];
+    if (ips.length === 0) return res.json({ success: true, data: {} });
+
+    const data = {};
+    try {
+        await mapWithConcurrency(ips, 8, async (ip) => {
+            data[ip] = await getColoCached(ip);
+        });
+        res.json({ success: true, data });
+    } catch (e) {
+        res.status(500).json({ success: false, msg: '地区查询失败' });
+    }
+});
+
 // --- 以下为原有的测速与解析逻辑（保持不变） ---
 const cfColoMap = {
     'HKG': '🇭🇰 香港', 'TPE': '🇹🇼 台北', 'NRT': '🇯🇵 东京', 'KIX': '🇯🇵 大阪',
@@ -344,6 +363,28 @@ function getColo(ip) {
         }).on('error', () => resolve('❓ 测速节点'))
           .on('timeout', () => { req.destroy(); resolve('⏳ 超时'); });
     });
+}
+
+async function getColoCached(ip) {
+    const key = String(ip || '').trim();
+    if (!key) return '❓ 未知';
+    if (coloCache.has(key)) return coloCache.get(key);
+    const region = await getColo(key);
+    coloCache.set(key, region || '❓ 未知');
+    return coloCache.get(key);
+}
+
+async function mapWithConcurrency(items, limit, mapper) {
+    const queue = Array.isArray(items) ? [...items] : [];
+    const workerCount = Math.max(1, Math.min(limit || 1, queue.length || 1));
+    const workers = Array.from({ length: workerCount }).map(async () => {
+        while (queue.length > 0) {
+            const item = queue.shift();
+            if (typeof item === 'undefined') continue;
+            await mapper(item);
+        }
+    });
+    await Promise.all(workers);
 }
 
 const cfGlobalDnsServers = [
@@ -514,15 +555,20 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
         }
         const topResults = filtered.slice(0, cfstConfig.topN);
 
-        const promises = topResults.map(async (item) => {
+        const pendingRegionIps = [];
+        topResults.forEach((item) => {
             if (item.csvColo && item.csvColo !== '' && item.csvColo !== '0.00' && item.csvColo !== '未知' && item.csvColo !== 'N/A') {
                 item.region = cfColoMap[item.csvColo] || `🌐 ${item.csvColo}`;
             } else {
-                item.region = await getColo(item.ip);
+                item.region = '⏳ 获取中';
+                pendingRegionIps.push(item.ip);
             }
-            return item;
         });
-        await Promise.all(promises);
+        if (pendingRegionIps.length > 0) {
+            mapWithConcurrency([...new Set(pendingRegionIps)], 6, async (ip) => {
+                await getColoCached(ip);
+            }).catch(() => {});
+        }
         sendProgress(taskId, { state: 'done', phase: '完成', message: `测速完成，共获得 ${topResults.length} 个节点`, percent: 100, current: 1, total: 1 });
         closeProgress(taskId);
         res.json({ success: true, data: topResults });
