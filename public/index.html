@@ -106,9 +106,9 @@
         body.dark { background-color: #0b1220; color: #e5e7eb; }
         body.dark .header h1 { color: #e5e7eb; }
         body.dark .header p { color: #94a3b8; }
-        body.dark .tab-switcher { background: rgba(148, 163, 184, 0.18); }
-        body.dark .tab-btn { color: #cbd5e1; }
-        body.dark .tab-btn.active { background: rgba(30, 41, 59, 0.85); color: #a5b4fc; box-shadow: 0 1px 3px rgba(0,0,0,0.35); }
+        body.dark .tab-switcher { background: rgba(15, 23, 42, 0.4); border: 1px solid rgba(148, 163, 184, 0.16); }
+        body.dark .tab-btn { color: #94a3b8; }
+        body.dark .tab-btn.active { background: rgba(59, 130, 246, 0.15); color: #60a5fa; box-shadow: 0 1px 3px rgba(0,0,0,0.35); border: 1px solid rgba(59, 130, 246, 0.25); }
         body.dark .glass-card { background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(148, 163, 184, 0.16); }
         body.dark .input-area textarea { background: rgba(15, 23, 42, 0.6); border-color: rgba(148, 163, 184, 0.25); color: #e5e7eb; }
         body.dark .input-area textarea:focus { background: rgba(15, 23, 42, 0.75); }
@@ -128,6 +128,8 @@
         body.dark .action-bar div { color: #cbd5e1 !important; }
         body.dark .action-btn { color: #e5e7eb; }
         body.dark .action-btn:disabled { background-color: rgba(148, 163, 184, 0.22) !important; color: rgba(226, 232, 240, 0.65); }
+        body.dark .text-slate-800 { color: #e2e8f0; } /* Fix dark mode text visibility */
+        body.dark .text-slate-500 { color: #94a3b8; } /* Fix dark mode ping text visibility */
         body.dark th { background-color: rgba(30, 41, 59, 0.35); color: #94a3b8; border-bottom-color: rgba(148, 163, 184, 0.16); }
         body.dark td { border-bottom-color: rgba(148, 163, 184, 0.12); color: #e5e7eb; }
         body.dark tr:hover td { background-color: rgba(148, 163, 184, 0.08); }
@@ -341,7 +343,7 @@
     </div>
 
     <div class="bottom-bar" id="bottom-bar">
-        <button id="start-btn" class="btn btn-glow">🚀 启动全球嗅探与测速</button>
+        <button id="start-btn" class="btn btn-glow">开始测速</button>
     </div>
 
     <div id="toast">✅ 操作成功</div>
@@ -743,8 +745,20 @@
             resultBody.innerHTML = `<tr><td colspan="5" class="text-center" style="padding: 3rem;"><div class="spinner" style="margin: 0 auto;"></div></td></tr>`;
             try {
                 const res = await fetch('/api/saved-ips'); const json = await res.json();
-                if (json.success) renderTable(json.data.sort((a, b) => b.speed - a.speed), '📭 收藏夹空空如也，快去测速页面收藏几个王者节点吧！');
-            } catch (e) { showToast('❌ 无法连接服务器获取收藏夹'); }
+                if (json.success) {
+                    const data = json.data || [];
+                    if (data.length === 0) {
+                        renderTable([], '📭 收藏夹空空如也，快去测速页面收藏几个极速节点吧！');
+                    } else {
+                        renderTable(data.sort((a, b) => b.speed - a.speed), '📭 收藏夹空空如也，快去测速页面收藏几个极速节点吧！');
+                    }
+                } else {
+                    renderTable([], '❌ 获取收藏夹数据失败');
+                }
+            } catch (e) { 
+                renderTable([], '❌ 无法连接服务器获取收藏夹');
+                showToast('❌ 无法连接服务器获取收藏夹'); 
+            }
         }
 
         saveSelectedBtn.addEventListener('click', async () => {
@@ -769,7 +783,7 @@
 
         // --- 启动测速 ---
         startBtn.addEventListener('click', async () => {
-            startBtn.disabled = true; startBtn.innerText = '⚡ 全速运转中...';
+            startBtn.disabled = true; startBtn.innerText = '测速中...';
             resetProgressUI();
             
             // 每次测速前重新读取文本框，防止用户手打内容忘了触发失去焦点
@@ -810,7 +824,7 @@
             } catch (error) { showToast('网络请求失败！请检查后端'); statusPanel.classList.add('hidden'); } 
             finally {
                 setTimeout(() => closeProgressStream(), 800);
-                startBtn.disabled = false; startBtn.innerText = '🚀 重新全球嗅探';
+                startBtn.disabled = false; startBtn.innerText = '重新测速';
             }
         });
 
