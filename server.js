@@ -7,7 +7,7 @@ const multer = require('multer');
 const http = require('http');
 const dns = require('dns').promises;
 const crypto = require('crypto');
-const sqlite3 = require('sqlite3').verbose();
+
 
 const app = express();
 const PORT = 3088; 
@@ -123,95 +123,49 @@ app.get('/api/progress/:taskId', (req, res) => {
     });
 });
 
-// --- 💾 数据库配置：持久化存储文件 ---
-const SQLITE_FILE = path.join(__dirname, 'database.sqlite');
+// --- 💾 数据库配置：JSON 持久化存储 ---
+const DB_FILE = path.join(__dirname, 'database.json');
 const LEGACY_JSON_FILE = path.join(__dirname, 'saved_ips.json');
-const db = new sqlite3.Database(SQLITE_FILE);
-
-function dbRun(sql, params = []) {
-    return new Promise((resolve, reject) => {
-        db.run(sql, params, function (err) {
-            if (err) return reject(err);
-            resolve(this);
-        });
-    });
-}
-
-function dbGet(sql, params = []) {
-    return new Promise((resolve, reject) => {
-        db.get(sql, params, (err, row) => {
-            if (err) return reject(err);
-            resolve(row);
-        });
-    });
-}
-
-function dbAll(sql, params = []) {
-    return new Promise((resolve, reject) => {
-        db.all(sql, params, (err, rows) => {
-            if (err) return reject(err);
-            resolve(rows);
-        });
-    });
-}
+let dbData = { saved_ips: [], settings: {} };
 
 async function initDb() {
-    await dbRun('PRAGMA journal_mode = WAL');
-    await dbRun('PRAGMA synchronous = NORMAL');
-    await dbRun('PRAGMA foreign_keys = ON');
-    await dbRun(`
-        CREATE TABLE IF NOT EXISTS saved_ips (
-            ip TEXT PRIMARY KEY,
-            loss REAL,
-            ping REAL,
-            speed REAL,
-            csvColo TEXT,
-            region TEXT,
-            created_at INTEGER NOT NULL
-        )
-    `);
-    await dbRun(`
-        CREATE TABLE IF NOT EXISTS settings (
-            key TEXT PRIMARY KEY,
-            value TEXT NOT NULL,
-            updated_at INTEGER NOT NULL
-        )
-    `);
+    try {
+        if (fs.existsSync(DB_FILE)) {
+            const raw = await fs.promises.readFile(DB_FILE, 'utf-8');
+            dbData = JSON.parse(raw);
+            if (!dbData.saved_ips) dbData.saved_ips = [];
+            if (!dbData.settings) dbData.settings = {};
+        } else {
+            await fs.promises.writeFile(DB_FILE, JSON.stringify(dbData, null, 2));
+        }
+    } catch (e) {
+        console.error('数据库初始化失败:', e);
+    }
+}
+
+async function saveDb() {
+    try {
+        await fs.promises.writeFile(DB_FILE, JSON.stringify(dbData, null, 2));
+    } catch (e) {
+        console.error('数据库保存失败:', e);
+    }
 }
 
 async function getSetting(key) {
-    const row = await dbGet('SELECT value FROM settings WHERE key = ?', [key]);
-    return row ? row.value : null;
+    return dbData.settings[key] || null;
 }
 
 async function setSetting(key, value) {
-    const now = Date.now();
-    await dbRun(
-        'INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at',
-        [key, value, now]
-    );
+    dbData.settings[key] = value;
+    await saveDb();
 }
 
 async function getCfstConfig() {
     const defaults = {
-        n: 200,
-        t: 4,
-        tp: 443,
-        url: 'https://speed.cloudflare.com/__down?bytes=20000000',
-        mode: 'tcp',
-        httpingCode: 200,
-        cfcolo: '',
-        dt: 5,
-        dn: 10,
-        dnSingle: 1,
-        tl: 9999,
-        tll: 0,
-        tlr: 1,
-        sl: 0,
-        disableDownload: false,
-        allip: false,
-        debug: false,
-        topN: 50
+        n: 200, t: 4, tp: 443, url: 'https://speed.cloudflare.com/__down?bytes=20000000',
+        mode: 'tcp', httpingCode: 200, cfcolo: '', dt: 5, dn: 10, dnSingle: 1,
+        tl: 9999, tll: 0, tlr: 1, sl: 0, disableDownload: false, allip: false,
+        debug: false, topN: 50
     };
     const raw = await getSetting('cfst_config');
     if (!raw) return defaults;
@@ -248,56 +202,44 @@ async function getCfstConfig() {
 
 async function migrateLegacySavedIpsIfNeeded() {
     if (!fs.existsSync(LEGACY_JSON_FILE)) return;
-    const countRow = await dbGet('SELECT COUNT(1) AS c FROM saved_ips');
-    const hasRows = countRow && Number(countRow.c) > 0;
-    if (hasRows) return;
+    if (dbData.saved_ips.length > 0) return;
 
     let raw = '';
     try {
         raw = fs.readFileSync(LEGACY_JSON_FILE, 'utf-8');
-    } catch {
-        return;
-    }
+    } catch { return; }
     if (!raw.trim()) return;
 
     let items = [];
     try {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) items = parsed;
-    } catch {
-        return;
-    }
+    } catch { return; }
     if (items.length === 0) return;
 
-    await dbRun('BEGIN IMMEDIATE');
-    try {
-        for (const item of items) {
-            if (!item || !item.ip) continue;
-            const ip = String(item.ip).trim();
-            if (!ip) continue;
-            await dbRun(
-                'INSERT OR IGNORE INTO saved_ips (ip, loss, ping, speed, csvColo, region, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                [
-                    ip,
-                    Number.isFinite(Number(item.loss)) ? Number(item.loss) : null,
-                    Number.isFinite(Number(item.ping)) ? Number(item.ping) : null,
-                    Number.isFinite(Number(item.speed)) ? Number(item.speed) : null,
-                    item.csvColo ? String(item.csvColo) : null,
-                    item.region ? String(item.region) : null,
-                    Date.now()
-                ]
-            );
+    for (const item of items) {
+        if (!item || !item.ip) continue;
+        const ip = String(item.ip).trim();
+        if (!ip) continue;
+        const existing = dbData.saved_ips.find(s => s.ip === ip);
+        if (!existing) {
+            dbData.saved_ips.push({
+                ip,
+                loss: Number.isFinite(Number(item.loss)) ? Number(item.loss) : null,
+                ping: Number.isFinite(Number(item.ping)) ? Number(item.ping) : null,
+                speed: Number.isFinite(Number(item.speed)) ? Number(item.speed) : null,
+                csvColo: item.csvColo ? String(item.csvColo) : null,
+                region: item.region ? String(item.region) : null,
+                created_at: Date.now()
+            });
         }
-        await dbRun('COMMIT');
-    } catch (e) {
-        await dbRun('ROLLBACK');
-        throw e;
     }
+    await saveDb();
 }
 
 app.get('/api/saved-ips', async (req, res) => {
     try {
-        const rows = await dbAll('SELECT ip, loss, ping, speed, csvColo, region FROM saved_ips ORDER BY created_at DESC');
+        const rows = [...dbData.saved_ips].sort((a, b) => b.created_at - a.created_at);
         res.json({ success: true, data: rows });
     } catch (e) {
         res.status(500).json({ success: false, msg: '读取收藏失败' });
@@ -310,29 +252,27 @@ app.post('/api/save-ips', async (req, res) => {
 
     let added = 0;
     try {
-        await dbRun('BEGIN IMMEDIATE');
         for (const item of newIps) {
             if (!item || !item.ip) continue;
             const ip = String(item.ip).trim();
             if (!ip) continue;
-            const r = await dbRun(
-                'INSERT OR IGNORE INTO saved_ips (ip, loss, ping, speed, csvColo, region, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-                [
+            const existingIdx = dbData.saved_ips.findIndex(s => s.ip === ip);
+            if (existingIdx === -1) {
+                dbData.saved_ips.push({
                     ip,
-                    Number.isFinite(Number(item.loss)) ? Number(item.loss) : null,
-                    Number.isFinite(Number(item.ping)) ? Number(item.ping) : null,
-                    Number.isFinite(Number(item.speed)) ? Number(item.speed) : null,
-                    item.csvColo ? String(item.csvColo) : null,
-                    item.region ? String(item.region) : null,
-                    Date.now()
-                ]
-            );
-            added += r.changes || 0;
+                    loss: Number.isFinite(Number(item.loss)) ? Number(item.loss) : null,
+                    ping: Number.isFinite(Number(item.ping)) ? Number(item.ping) : null,
+                    speed: Number.isFinite(Number(item.speed)) ? Number(item.speed) : null,
+                    csvColo: item.csvColo ? String(item.csvColo) : null,
+                    region: item.region ? String(item.region) : null,
+                    created_at: Date.now()
+                });
+                added++;
+            }
         }
-        await dbRun('COMMIT');
+        if (added > 0) await saveDb();
         res.json({ success: true, added });
     } catch (e) {
-        try { await dbRun('ROLLBACK'); } catch {}
         res.status(500).json({ success: false, msg: '保存收藏失败' });
     }
 });
@@ -341,8 +281,11 @@ app.post('/api/delete-ips', async (req, res) => {
     const ips = Array.isArray(req.body.ips) ? req.body.ips.map(s => String(s).trim()).filter(Boolean) : [];
     if (ips.length === 0) return res.json({ success: true });
     try {
-        const placeholders = ips.map(() => '?').join(',');
-        await dbRun(`DELETE FROM saved_ips WHERE ip IN (${placeholders})`, ips);
+        const initialLength = dbData.saved_ips.length;
+        dbData.saved_ips = dbData.saved_ips.filter(item => !ips.includes(item.ip));
+        if (dbData.saved_ips.length !== initialLength) {
+            await saveDb();
+        }
         res.json({ success: true });
     } catch (e) {
         res.status(500).json({ success: false, msg: '删除收藏失败' });
@@ -361,24 +304,14 @@ app.get('/api/settings/cfst', async (req, res) => {
 app.post('/api/settings/cfst', async (req, res) => {
     const body = req.body || {};
     const cfg = {
-        n: body.n,
-        t: body.t,
-        tp: body.tp,
+        n: body.n, t: body.t, tp: body.tp,
         url: typeof body.url === 'string' ? body.url.trim() : '',
-        mode: body.mode,
-        httpingCode: body.httpingCode,
+        mode: body.mode, httpingCode: body.httpingCode,
         cfcolo: typeof body.cfcolo === 'string' ? body.cfcolo.trim() : '',
-        dt: body.dt,
-        dn: body.dn,
-        dnSingle: body.dnSingle,
-        tl: body.tl,
-        tll: body.tll,
-        tlr: body.tlr,
-        sl: body.sl,
+        dt: body.dt, dn: body.dn, dnSingle: body.dnSingle,
+        tl: body.tl, tll: body.tll, tlr: body.tlr, sl: body.sl,
         disableDownload: Boolean(body.disableDownload),
-        allip: Boolean(body.allip),
-        debug: Boolean(body.debug),
-        topN: body.topN
+        allip: Boolean(body.allip), debug: Boolean(body.debug), topN: body.topN
     };
     try {
         await setSetting('cfst_config', JSON.stringify(cfg));

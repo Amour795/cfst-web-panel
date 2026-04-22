@@ -26,7 +26,7 @@ fail() { echo -e "${RED}❌ $1${NC}"; }
 hr
 title "  🚀 CFST Web Panel 控制台 v2.3"
 title "  ─────────────────────────"
-echo -e "${CYAN} SQLite 持久化 · 黑夜模式${NC}"
+echo -e "${CYAN} JSON 持久化 · 黑夜模式${NC}"
 hr
 
 # --- 1. 核心模块：环境与架构嗅探 ---
@@ -132,7 +132,7 @@ start_server() {
         echo -e "👉 请在浏览器访问: ${GREEN}http://localhost:3088${NC}"
     fi
     echo -e "👉 设置页：点击顶部 ${YELLOW}⚙️ 设置${NC}，可配置引擎参数与黑夜模式"
-    echo -e "👉 数据库：${YELLOW}database.sqlite${NC}（无需额外部署）"
+    echo -e "👉 数据库：${YELLOW}database.json${NC}（无需额外部署）"
     hr
     node server.js
 }
@@ -140,7 +140,7 @@ start_server() {
 # --- 2. 交互式主逻辑 ---
 
 if [ -d "$PROJECT_DIR" ]; then
-    echo -e "👉 数据库：${YELLOW}database.sqlite${NC}（无需额外部署）"
+    echo -e "👉 数据库：${YELLOW}database.json${NC}（无需额外部署）"
     warn "检测到本地已部署 ${PROJECT_DIR} 项目"
     echo -e "请选择你需要执行的操作："
     echo -e "  ${GREEN}1.${NC} 启动测速面板 (直接运行)"
