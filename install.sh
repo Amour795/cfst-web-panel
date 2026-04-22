@@ -80,7 +80,9 @@ check_and_install_node() {
     # 执行 Node.js 安装
     if $IS_TERMUX; then
         pkg install nodejs -y
-        pkg install nodejs -y
+    elif [ "$OS" == "Linux" ]; then
+        if command -v apt-get &> /dev/null; then
+            curl -fsSL https://deb.nodesource.com/setup_18.x | sudo -E bash - > /dev/null 2>&1
             sudo apt-get install -y nodejs > /dev/null 2>&1
         elif command -v yum &> /dev/null; then
             curl -fsSL https://rpm.nodesource.com/setup_18.x | sudo bash - > /dev/null 2>&1
