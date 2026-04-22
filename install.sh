@@ -121,8 +121,8 @@ update_code() {
     git pull origin main
     info "正在检查并更新 Node.js 依赖..."
     if $IS_TERMUX; then
-        npm install termux-sqlite3 --no-fund --no-audit
-        sed -i 's/"sqlite3": ".*"/"termux-sqlite3": "^1.0.2"/g' package.json
+        npm install https://github.com/renpwn/termux-sqlite3 --no-fund --no-audit
+        sed -i 's/"sqlite3": ".*"/"termux-sqlite3": "github:renpwn\/termux-sqlite3"/g' package.json
         sed -i "s/require('sqlite3')/require('termux-sqlite3')/g" server.js
     fi
     npm install --no-fund --no-audit
@@ -203,9 +203,9 @@ else
     info "正在安装 Node.js 依赖..."
     if $IS_TERMUX; then
         # Termux 下使用纯 JS 版本的 sqlite3 替代原生编译版本，避免编译报错
-        npm install termux-sqlite3 --no-fund --no-audit
+        npm install https://github.com/renpwn/termux-sqlite3 --no-fund --no-audit
         # 替换 package.json 中的依赖
-        sed -i 's/"sqlite3": ".*"/"termux-sqlite3": "^1.0.2"/g' package.json
+        sed -i 's/"sqlite3": ".*"/"termux-sqlite3": "github:renpwn\/termux-sqlite3"/g' package.json
         # 替换代码中的引入
         sed -i "s/require('sqlite3')/require('termux-sqlite3')/g" server.js
     fi
