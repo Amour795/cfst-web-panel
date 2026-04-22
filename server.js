@@ -272,6 +272,7 @@ app.post('/api/save-ips', async (req, res) => {
     if (newIps.length === 0) return res.json({ success: true, added: 0 });
 
     let added = 0;
+    let updated = 0;
     try {
         for (const item of newIps) {
             if (!item || !item.ip) continue;
@@ -289,10 +290,21 @@ app.post('/api/save-ips', async (req, res) => {
                     created_at: Date.now()
                 });
                 added++;
+            } else {
+                dbData.saved_ips[existingIdx] = {
+                    ...dbData.saved_ips[existingIdx],
+                    loss: Number.isFinite(Number(item.loss)) ? Number(item.loss) : dbData.saved_ips[existingIdx].loss,
+                    ping: Number.isFinite(Number(item.ping)) ? Number(item.ping) : dbData.saved_ips[existingIdx].ping,
+                    speed: Number.isFinite(Number(item.speed)) ? Number(item.speed) : dbData.saved_ips[existingIdx].speed,
+                    csvColo: item.csvColo ? String(item.csvColo) : dbData.saved_ips[existingIdx].csvColo,
+                    region: item.region ? String(item.region) : dbData.saved_ips[existingIdx].region,
+                    updated_at: Date.now()
+                };
+                updated++;
             }
         }
-        if (added > 0) await saveDb();
-        res.json({ success: true, added });
+        if (added > 0 || updated > 0) await saveDb();
+        res.json({ success: true, added, updated });
     } catch (e) {
         res.status(500).json({ success: false, msg: '保存收藏失败' });
     }

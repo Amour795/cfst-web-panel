@@ -219,7 +219,8 @@
                 settingsViewContainer.classList.add('hidden');
                 tableCard.classList.remove('hidden');
                 bottomBar.classList.add('hide-down'); // 丝滑隐藏底部按钮
-                saveSelectedBtn.classList.add('hidden');
+                saveSelectedBtn.classList.remove('hidden');
+                saveSelectedBtn.innerText = '⚡ 测速选中';
                 deleteSelectedBtn.classList.remove('hidden');
                 fetchAndRenderFavorites();
             } else if (view === 'settings') {
@@ -238,6 +239,7 @@
                 tableCard.classList.remove('hidden');
                 bottomBar.classList.remove('hide-down'); // 弹回底部按钮
                 saveSelectedBtn.classList.remove('hidden');
+                saveSelectedBtn.innerText = '💾 收藏';
                 deleteSelectedBtn.classList.add('hidden');
                 renderTable(currentTableData, '准备就绪，点击底部按钮开始测速');
             }
@@ -616,6 +618,67 @@
         }
 
         saveSelectedBtn.addEventListener('click', async () => {
+            if (currentView === 'favorites') {
+                const selectedIps = Array.from(document.querySelectorAll('.ip-checkbox:checked')).map(cb => cb.dataset.ip).filter(Boolean);
+                if (selectedIps.length === 0) return showToast('❌ 请先选择要测速的 IP');
+                const taskId = `task_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+                try {
+                    statusPanel.classList.remove('hidden');
+                    statusTitle.innerText = '收藏测速';
+                    statusSub.innerText = `正在测速 ${selectedIps.length} 个已收藏 IP...`;
+                    closeProgressStream();
+                    startProgressPolling(taskId);
+                    progressSource = new EventSource(`/api/progress/${encodeURIComponent(taskId)}`);
+                    progressSource.onmessage = (event) => {
+                        try { updateProgressUI(JSON.parse(event.data)); } catch (e) {}
+                    };
+                    progressSource.onerror = () => closeProgressStream();
+
+                    const response = await fetch('/api/start-test', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            targetIps: selectedIps,
+                            inputMode: 'ip',
+                            taskId,
+                            runtimeOptions: {
+                                incremental: false,
+                                parseTimeoutSec: Number(parseTimeoutInput.value || 25),
+                                totalTimeoutSec: Number(totalTimeoutInput.value || 150),
+                                performanceMode: /mobile/i.test(navigator.userAgent) ? 'mobile' : 'auto',
+                                profile: /mobile/i.test(navigator.userAgent) ? 'mobile' : 'desktop'
+                            }
+                        })
+                    });
+                    const json = await response.json();
+                    if (!json.success) {
+                        showToast(`❌ 测速失败: ${json.msg || '未知错误'}`);
+                        return;
+                    }
+
+                    const tested = Array.isArray(json.data) ? json.data : [];
+                    const saveRes = await fetch('/api/save-ips', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ ips: tested })
+                    });
+                    const saveJson = await saveRes.json();
+                    if (saveJson.success) {
+                        const failedCount = Math.max(0, selectedIps.length - tested.length);
+                        showToast(`✅ 已更新 ${saveJson.updated || 0} 个收藏${failedCount > 0 ? `，${failedCount} 个疑似不可用` : ''}`);
+                        fetchAndRenderFavorites();
+                    } else {
+                        showToast('❌ 测速结果回写失败');
+                    }
+                } catch (e) {
+                    showToast('❌ 收藏测速失败');
+                } finally {
+                    setTimeout(() => closeProgressStream(), 800);
+                    stopProgressPolling();
+                }
+                return;
+            }
+
             const ipsToSave = Array.from(document.querySelectorAll('.ip-checkbox:checked')).map(cb => ({
                 ip: cb.dataset.ip, region: cb.dataset.region, ping: parseFloat(cb.dataset.ping), speed: parseFloat(cb.dataset.speed)
             }));
