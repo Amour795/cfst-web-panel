@@ -124,6 +124,12 @@ app.get('/api/progress/:taskId', (req, res) => {
     });
 });
 
+app.get('/api/progress-state/:taskId', (req, res) => {
+    const taskId = req.params.taskId;
+    const payload = lastProgress.get(taskId) || { state: 'waiting', phase: '等待任务', message: '等待测速任务启动...' };
+    res.json({ success: true, data: payload });
+});
+
 // --- 💾 数据库配置：JSON 持久化存储 ---
 const DB_FILE = path.join(__dirname, 'database.json');
 const LEGACY_JSON_FILE = path.join(__dirname, 'saved_ips.json');

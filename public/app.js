@@ -62,6 +62,7 @@
         let currentTableData = []; 
         let parsedTargets = [];
         let progressSource = null;
+        let progressPollTimer = null;
         let lastProgressPercent = 0;
         let regionHydrationSeq = 0;
         const mixedRegex = /(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)|(?:[a-zA-Z0-9][-a-zA-Z0-9]{0,62}\.)+[a-zA-Z]{2,}/g;
@@ -123,6 +124,28 @@
                 progressSource.close();
                 progressSource = null;
             }
+        }
+
+        function stopProgressPolling() {
+            if (progressPollTimer) {
+                clearInterval(progressPollTimer);
+                progressPollTimer = null;
+            }
+        }
+
+        function startProgressPolling(taskId) {
+            stopProgressPolling();
+            progressPollTimer = setInterval(async () => {
+                try {
+                    const res = await fetch(`/api/progress-state/${encodeURIComponent(taskId)}`);
+                    const json = await res.json();
+                    if (!json.success || !json.data) return;
+                    updateProgressUI(json.data);
+                    if (json.data.state === 'done' || json.data.state === 'error') {
+                        stopProgressPolling();
+                    }
+                } catch (e) {}
+            }, 1200);
         }
 
         function resetProgressUI() {
@@ -557,6 +580,7 @@
             try {
                 const taskId = `task_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
                 closeProgressStream();
+                startProgressPolling(taskId);
                 progressSource = new EventSource(`/api/progress/${encodeURIComponent(taskId)}`);
                 progressSource.onmessage = (event) => {
                     try { updateProgressUI(JSON.parse(event.data)); } catch (e) {}
@@ -581,10 +605,12 @@
                     progressLabel.innerText = '100%';
                     statusTitle.innerText = '完成';
                     statusSub.innerText = `测速完毕：${json.data.length} 个节点`;
+                    stopProgressPolling();
                 } else { showToast('测速失败: ' + json.msg); statusPanel.classList.add('hidden'); }
             } catch (error) { showToast('网络请求失败！请检查后端'); statusPanel.classList.add('hidden'); } 
             finally {
                 setTimeout(() => closeProgressStream(), 800);
+                stopProgressPolling();
                 startBtn.disabled = false; startBtn.innerText = '重新测速';
             }
         });
