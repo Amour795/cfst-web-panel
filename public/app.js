@@ -98,6 +98,22 @@
             if (trend === 'stable') return '➡️ 稳定';
             return '🆕 新节点';
         }
+        const REGION_CODE_MAP = {
+            HKG: 'HK', KHH: 'TW', TPE: 'TW', NRT: 'JP', KIX: 'JP',
+            SIN: 'SG', SGP: 'SG', ICN: 'KR', LAX: 'US', SJC: 'US',
+            SEA: 'US', FRA: 'DE', LHR: 'GB', SYD: 'AU', CDG: 'FR',
+            AMS: 'NL', YYZ: 'CA', KUL: 'MY', BKK: 'TH', MNL: 'PH',
+            CGK: 'ID', BOM: 'IN'
+        };
+        function normalizeRegionForCopy(csvColo, regionText) {
+            const colo = String(csvColo || '').trim().toUpperCase();
+            if (colo && colo !== 'N/A') return REGION_CODE_MAP[colo] || colo;
+            const cleaned = String(regionText || '')
+                .replace(/[^\u4e00-\u9fa5A-Za-z0-9_-]/g, '')
+                .toUpperCase();
+            if (!cleaned) return 'UNKNOWN';
+            return REGION_CODE_MAP[cleaned] || cleaned;
+        }
         
         const THEME_KEY = 'cfst_theme_mode';
         const systemDarkMql = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
@@ -542,9 +558,7 @@
             if (currentView === 'favorites') {
                 const lines = selected.map((cb) => {
                     const ip = cb.dataset.ip || '';
-                    const code = String(cb.dataset.csvcolo || '').trim();
-                    const regionText = String(cb.dataset.region || '').replace(/[^\u4e00-\u9fa5A-Za-z0-9_-]/g, '');
-                    const region = code && code !== 'N/A' ? code : (regionText || 'UNKNOWN');
+                    const region = normalizeRegionForCopy(cb.dataset.csvcolo, cb.dataset.region);
                     const tag = String(cb.dataset.tag || '').trim() || '未标记';
                     return `${ip}#${region}|${tag}`;
                 }).join('\n');
