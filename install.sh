@@ -120,6 +120,11 @@ update_code() {
     info "正在从 GitHub 拉取最新面板代码..."
     git pull origin main
     info "正在检查并更新 Node.js 依赖..."
+    if $IS_TERMUX; then
+        npm install termux-sqlite3 --no-fund --no-audit
+        sed -i 's/"sqlite3": ".*"/"termux-sqlite3": "^1.0.2"/g' package.json
+        sed -i "s/require('sqlite3')/require('termux-sqlite3')/g" server.js
+    fi
     npm install --no-fund --no-audit
     ok "代码与依赖更新完毕"
 }
@@ -197,8 +202,12 @@ else
 
     info "正在安装 Node.js 依赖..."
     if $IS_TERMUX; then
-        export GYP_DEFINES="android_ndk_path=''"
-        npm install sqlite3 --build-from-source --sqlite=/data/data/com.termux/files/usr/bin/sqlite3 --no-fund --no-audit
+        # Termux 下使用纯 JS 版本的 sqlite3 替代原生编译版本，避免编译报错
+        npm install termux-sqlite3 --no-fund --no-audit
+        # 替换 package.json 中的依赖
+        sed -i 's/"sqlite3": ".*"/"termux-sqlite3": "^1.0.2"/g' package.json
+        # 替换代码中的引入
+        sed -i "s/require('sqlite3')/require('termux-sqlite3')/g" server.js
     fi
     npm install --no-fund --no-audit
 
