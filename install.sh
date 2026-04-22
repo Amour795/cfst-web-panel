@@ -196,6 +196,10 @@ else
     download_engine
 
     info "正在安装 Node.js 依赖..."
+    if $IS_TERMUX; then
+        export GYP_DEFINES="android_ndk_path=''"
+        npm install sqlite3 --build-from-source --sqlite=/data/data/com.termux/files/usr/bin/sqlite3 --no-fund --no-audit
+    fi
     npm install --no-fund --no-audit
 
     start_server
