@@ -544,16 +544,35 @@ async function resolveTargets(targets) {
     });
 
     if (domains.length > 0) {
-        const promises = [];
-        domains.forEach(domain => {
-            cfGlobalDnsServers.forEach(servers => {
-                const resolver = new dns.Resolver();
-                resolver.setServers(servers);
-                promises.push(resolver.resolve4(domain).catch(() => { return []; }));
-            });
+        const resolveWithTimeout = async (resolver, domain, timeoutMs = 2500) => {
+            let timer = null;
+            try {
+                return await Promise.race([
+                    resolver.resolve4(domain).catch(() => []),
+                    new Promise((resolve) => {
+                        timer = setTimeout(() => {
+                            try { resolver.cancel(); } catch {}
+                            resolve([]);
+                        }, timeoutMs);
+                    })
+                ]);
+            } finally {
+                if (timer) clearTimeout(timer);
+            }
+        };
+
+        // 限制域名解析规模与并发，避免批量输入时卡在解析阶段
+        const domainList = domains.slice(0, 120);
+        const jobs = [];
+        domainList.forEach((domain) => {
+            cfGlobalDnsServers.forEach((servers) => jobs.push({ domain, servers }));
         });
-        const results = await Promise.all(promises);
-        results.forEach(records => records.forEach(ip => finalIps.add(ip)));
+        await mapWithConcurrency(jobs, 16, async ({ domain, servers }) => {
+            const resolver = new dns.Resolver();
+            resolver.setServers(servers);
+            const records = await resolveWithTimeout(resolver, domain, 2500);
+            records.forEach(ip => finalIps.add(ip));
+        });
     }
     return Array.from(finalIps);
 }
@@ -603,8 +622,15 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
     if (rawTargets.length > 0) {
         sendProgress(taskId, { state: 'running', phase: '解析目标', message: `正在解析 ${rawTargets.length} 个输入目标...` });
         let resolvedIps;
+        const ipRegexFast = /^(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)$/;
+        const allIpOnly = rawTargets.every((item) => ipRegexFast.test(String(item || '').trim()));
         try {
-            resolvedIps = await withTimeout(resolveTargets(rawTargets), parseTimeoutMs, '解析超时');
+            if (allIpOnly) {
+                resolvedIps = [...new Set(rawTargets.map(s => String(s).trim()).filter(Boolean))];
+                sendProgress(taskId, { state: 'running', phase: '解析目标', message: `检测到纯 IP 输入，快速跳过 DNS 解析（${resolvedIps.length} 个）` });
+            } else {
+                resolvedIps = await withTimeout(resolveTargets(rawTargets), parseTimeoutMs, '解析超时');
+            }
         } catch (e) {
             sendProgress(taskId, { state: 'error', phase: '解析失败', message: e.message || '解析超时' });
             closeProgress(taskId);
