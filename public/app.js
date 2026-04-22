@@ -55,6 +55,13 @@
         const cfstTopNInput = document.getElementById('cfst-topn');
         const performancePreset = document.getElementById('performance-preset');
         const applyPresetBtn = document.getElementById('apply-preset-btn');
+        const incrementalMode = document.getElementById('incremental-mode');
+        const parseTimeoutInput = document.getElementById('parse-timeout');
+        const totalTimeoutInput = document.getElementById('total-timeout');
+        const exportFormat = document.getElementById('export-format');
+        const exportBtn = document.getElementById('export-btn');
+        const scheduleInterval = document.getElementById('schedule-interval');
+        const scheduleBtn = document.getElementById('schedule-btn');
         const saveSettingsBtn = document.getElementById('save-settings-btn');
         const resetSettingsBtn = document.getElementById('reset-settings-btn');
 
@@ -83,6 +90,12 @@
         }
 
         function getSpeedClass(speed) { if (speed > 20) return 'speed-high'; if (speed > 5) return 'speed-mid'; return 'speed-low'; }
+        function getTrendLabel(trend) {
+            if (trend === 'up') return '⬆️ 提升';
+            if (trend === 'down') return '⬇️ 下降';
+            if (trend === 'stable') return '➡️ 稳定';
+            return '🆕 新节点';
+        }
         
         const THEME_KEY = 'cfst_theme_mode';
         const systemDarkMql = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
@@ -254,6 +267,8 @@
                 cfstDisableDownload.checked = true;
                 cfstAllip.checked = false;
                 cfstDebug.checked = false;
+                parseTimeoutInput.value = '20';
+                totalTimeoutInput.value = '90';
             } else if (presetKey === 'mobile_balanced') {
                 cfstMode.value = 'tcp';
                 cfstNInput.value = '64';
@@ -265,6 +280,8 @@
                 cfstDisableDownload.checked = false;
                 cfstAllip.checked = false;
                 cfstDebug.checked = false;
+                parseTimeoutInput.value = '25';
+                totalTimeoutInput.value = '120';
             } else if (presetKey === 'desktop_precision') {
                 cfstMode.value = 'tcp';
                 cfstNInput.value = '200';
@@ -276,6 +293,8 @@
                 cfstDisableDownload.checked = false;
                 cfstAllip.checked = false;
                 cfstDebug.checked = false;
+                parseTimeoutInput.value = '35';
+                totalTimeoutInput.value = '180';
             }
             updateCfstModeVisibility();
         }
@@ -403,6 +422,44 @@
             saveCfstConfig();
         });
 
+        exportBtn.addEventListener('click', async () => {
+            if (!Array.isArray(currentTableData) || currentTableData.length === 0) {
+                showToast('❌ 当前没有可导出的结果');
+                return;
+            }
+            try {
+                const res = await fetch('/api/export', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ format: exportFormat.value || 'clash', items: currentTableData })
+                });
+                const json = await res.json();
+                if (!json.success) return showToast('❌ 导出失败');
+                await copyToClipboard(json.data, '✅ 导出内容已复制到剪贴板');
+            } catch (e) {
+                showToast('❌ 导出失败');
+            }
+        });
+
+        scheduleBtn.addEventListener('click', async () => {
+            try {
+                const res = await fetch('/api/schedule', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        enabled: true,
+                        intervalMin: Number(scheduleInterval.value || 60),
+                        targets: parsedTargets.length > 0 ? parsedTargets : currentTableData.map(item => item.ip).filter(Boolean)
+                    })
+                });
+                const json = await res.json();
+                if (json.success) showToast('✅ 定时任务已保存');
+                else showToast('❌ 定时任务保存失败');
+            } catch (e) {
+                showToast('❌ 定时任务保存失败');
+            }
+        });
+
         // --- 🚀 新版输入区联动逻辑 ---
         function extractAndUpdateInput(text) {
             const matches = text.match(mixedRegex) || [];
@@ -437,7 +494,7 @@
             resultBody.innerHTML = ''; selectAllCheckbox.checked = false; updateSelectionState();
             if (!dataArray || dataArray.length === 0) {
                 actionBar.classList.add('hidden');
-                resultBody.innerHTML = `<tr><td colspan="5" class="text-center text-slate-500" style="padding: 4rem 1rem;">${emptyMsg}</td></tr>`;
+                resultBody.innerHTML = `<tr><td colspan="7" class="text-center text-slate-500" style="padding: 4rem 1rem;">${emptyMsg}</td></tr>`;
                 return;
             }
             actionBar.classList.remove('hidden');
@@ -451,6 +508,8 @@
                     <td><div class="copyable-ip font-mono text-slate-800" data-ip="${item.ip}">${item.ip}</div></td>
                     <td class="text-center text-slate-500">${Number(item.ping).toFixed(1)}ms</td>
                     <td class="text-right ${getSpeedClass(item.speed)}">${Number(item.speed).toFixed(2)}</td>
+                    <td class="text-center">${Number(item.healthScore || 0).toFixed(1)}</td>
+                    <td class="text-center text-slate-500">${getTrendLabel(item.trend)}</td>
                 `;
                 resultBody.appendChild(tr);
             });
@@ -592,7 +651,17 @@
                 // 现在的请求极其干净，只需要把纯文本 Target 数组发给后端
                 const response = await fetch('/api/start-test', { 
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ targetIps: parsedTargets, taskId }) 
+                    body: JSON.stringify({
+                        targetIps: parsedTargets,
+                        taskId,
+                        runtimeOptions: {
+                            incremental: incrementalMode.checked,
+                            parseTimeoutSec: Number(parseTimeoutInput.value || 25),
+                            totalTimeoutSec: Number(totalTimeoutInput.value || 150),
+                            performanceMode: /mobile/i.test(navigator.userAgent) ? 'mobile' : 'auto',
+                            profile: /mobile/i.test(navigator.userAgent) ? 'mobile' : 'desktop'
+                        }
+                    }) 
                 });
                 const json = await response.json();
 

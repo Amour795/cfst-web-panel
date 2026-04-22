@@ -235,6 +235,18 @@
                     <button id="apply-preset-btn" class="tool-btn" type="button">应用预设</button>
                     <div class="setting-hint">预设会批量填入参数，点击“保存设置”后生效。</div>
                 </div>
+                <div class="setting-row">
+                    <label><input id="incremental-mode" type="checkbox" checked> 增量测速模式（同目标重复测速更快）</label>
+                    <div class="setting-hint">开启后优先重测新增与高分节点，降低重复开销。</div>
+                </div>
+                <div class="setting-row">
+                    <label for="parse-timeout">解析超时（秒）</label>
+                    <input id="parse-timeout" type="number" min="5" max="120" step="1" value="25">
+                </div>
+                <div class="setting-row">
+                    <label for="total-timeout">任务总超时（秒）</label>
+                    <input id="total-timeout" type="number" min="20" max="600" step="1" value="150">
+                </div>
                 <div id="cfst-httping-box" class="setting-row mode-collapsible is-collapsed">
                     <label for="cfst-httping-code">HTTPing 有效状态码</label>
                     <input id="cfst-httping-code" type="number" min="100" max="599" step="1">
@@ -320,6 +332,13 @@
                 <div class="setting-actions">
                     <button id="save-settings-btn" class="tool-btn primary">💾 保存设置</button>
                     <button id="reset-settings-btn" class="tool-btn">↩︎ 恢复默认</button>
+                    <select id="export-format" class="tool-btn" style="appearance: none;">
+                        <option value="clash">导出 Clash</option>
+                        <option value="singbox">导出 Sing-box</option>
+                    </select>
+                    <button id="export-btn" class="tool-btn">📤 导出结果</button>
+                    <input id="schedule-interval" type="number" min="10" max="1440" step="10" value="60" style="max-width: 130px;">
+                    <button id="schedule-btn" class="tool-btn">⏱️ 保存定时</button>
                 </div>
             </div>
         </div>
@@ -345,10 +364,12 @@
                             <th>物理 IP (点击复制)</th>
                             <th class="text-center">延迟</th>
                             <th class="text-right" style="color: #4f46e5;">下载 (MB/s)</th>
+                            <th class="text-center">健康分</th>
+                            <th class="text-center">趋势</th>
                         </tr>
                     </thead>
                     <tbody id="result-body">
-                        <tr id="empty-row"><td colspan="5" class="text-center text-slate-400" style="padding: 4rem 1rem;">准备就绪，点击底部按钮开始测速</td></tr>
+                        <tr id="empty-row"><td colspan="7" class="text-center text-slate-400" style="padding: 4rem 1rem;">准备就绪，点击底部按钮开始测速</td></tr>
                     </tbody>
                 </table>
             </div>

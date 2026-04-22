@@ -23,6 +23,7 @@ const lastProgress = new Map();
 const taskPhase = new Map();
 const lastProgressKey = new Map();
 const coloCache = new Map();
+let scheduleTimer = null;
 
 function normalizeProgress(taskId, payload) {
     const knownPhase = taskPhase.get(taskId);
@@ -133,7 +134,7 @@ app.get('/api/progress-state/:taskId', (req, res) => {
 // --- 💾 数据库配置：JSON 持久化存储 ---
 const DB_FILE = path.join(__dirname, 'database.json');
 const LEGACY_JSON_FILE = path.join(__dirname, 'saved_ips.json');
-let dbData = { saved_ips: [], settings: {} };
+let dbData = { saved_ips: [], settings: {}, test_history: {}, last_targets: [] };
 
 async function initDb() {
     try {
@@ -142,6 +143,8 @@ async function initDb() {
             dbData = JSON.parse(raw);
             if (!dbData.saved_ips) dbData.saved_ips = [];
             if (!dbData.settings) dbData.settings = {};
+            if (!dbData.test_history || typeof dbData.test_history !== 'object') dbData.test_history = {};
+            if (!Array.isArray(dbData.last_targets)) dbData.last_targets = [];
         } else {
             await fs.promises.writeFile(DB_FILE, JSON.stringify(dbData, null, 2));
         }
@@ -347,6 +350,57 @@ app.post('/api/regions', async (req, res) => {
     }
 });
 
+app.post('/api/export', async (req, res) => {
+    const format = String(req.body?.format || 'clash').toLowerCase();
+    const rows = Array.isArray(req.body?.items) ? req.body.items : [];
+    const nodes = rows.filter(item => item && item.ip).slice(0, 50);
+    if (nodes.length === 0) {
+        return res.json({ success: false, msg: '没有可导出的节点' });
+    }
+
+    if (format === 'singbox') {
+        const outbounds = nodes.map((item, idx) => ({
+            type: 'http',
+            tag: `cf-${idx + 1}-${item.ip}`,
+            server: item.ip,
+            server_port: 443
+        }));
+        return res.json({ success: true, data: JSON.stringify({ outbounds }, null, 2) });
+    }
+
+    const proxies = nodes.map((item, idx) => ({
+        name: `CF-${idx + 1}-${item.ip}`,
+        type: 'http',
+        server: item.ip,
+        port: 443
+    }));
+    const clash = { proxies, 'proxy-groups': [{ name: 'CF-AUTO', type: 'select', proxies: proxies.map(p => p.name) }] };
+    res.json({ success: true, data: JSON.stringify(clash, null, 2) });
+});
+
+app.post('/api/schedule', async (req, res) => {
+    const body = req.body || {};
+    const enabled = Boolean(body.enabled);
+    const intervalMin = clamp(Number(body.intervalMin) || 60, 10, 1440);
+    const targets = Array.isArray(body.targets) ? body.targets.map(s => String(s || '').trim()).filter(Boolean).slice(0, 200) : [];
+    try {
+        await setSetting('schedule_config', JSON.stringify({ enabled, intervalMin, targets }));
+        if (scheduleTimer) {
+            clearInterval(scheduleTimer);
+            scheduleTimer = null;
+        }
+        if (enabled && targets.length > 0) {
+            scheduleTimer = setInterval(async () => {
+                dbData.last_targets = targets;
+                await saveDb();
+            }, intervalMin * 60 * 1000);
+        }
+        res.json({ success: true, data: { enabled, intervalMin, targetsCount: targets.length } });
+    } catch (e) {
+        res.status(500).json({ success: false, msg: '保存计划任务失败' });
+    }
+});
+
 // --- 以下为原有的测速与解析逻辑（保持不变） ---
 const cfColoMap = {
     'HKG': '🇭🇰 香港', 'TPE': '🇹🇼 台北', 'NRT': '🇯🇵 东京', 'KIX': '🇯🇵 大阪',
@@ -374,10 +428,13 @@ function getColo(ip) {
 async function getColoCached(ip) {
     const key = String(ip || '').trim();
     if (!key) return '❓ 未知';
-    if (coloCache.has(key)) return coloCache.get(key);
+    const cache = coloCache.get(key);
+    const now = Date.now();
+    if (cache && cache.expireAt > now) return cache.region;
     const region = await getColo(key);
-    coloCache.set(key, region || '❓ 未知');
-    return coloCache.get(key);
+    const normalized = region || '❓ 未知';
+    coloCache.set(key, { region: normalized, expireAt: now + 30 * 60 * 1000 });
+    return normalized;
 }
 
 async function mapWithConcurrency(items, limit, mapper) {
@@ -391,6 +448,82 @@ async function mapWithConcurrency(items, limit, mapper) {
         }
     });
     await Promise.all(workers);
+}
+
+function clamp(num, min, max) {
+    return Math.max(min, Math.min(max, num));
+}
+
+function withTimeout(taskPromise, timeoutMs, timeoutMessage) {
+    let timer = null;
+    const timeoutPromise = new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(timeoutMessage || '操作超时')), timeoutMs);
+    });
+    return Promise.race([taskPromise, timeoutPromise]).finally(() => {
+        if (timer) clearTimeout(timer);
+    });
+}
+
+function computeHealthScore(item) {
+    const ping = Number.isFinite(Number(item.ping)) ? Number(item.ping) : 9999;
+    const loss = Number.isFinite(Number(item.loss)) ? Number(item.loss) : 1;
+    const speed = Number.isFinite(Number(item.speed)) ? Number(item.speed) : 0;
+    const pingScore = clamp(100 - ping, 0, 100) * 0.45;
+    const speedScore = clamp(speed * 4, 0, 100) * 0.4;
+    const lossScore = clamp((1 - loss) * 100, 0, 100) * 0.15;
+    return Number((pingScore + speedScore + lossScore).toFixed(1));
+}
+
+function computeTrend(ip, currentSpeed) {
+    const hist = Array.isArray(dbData.test_history[ip]) ? dbData.test_history[ip] : [];
+    if (hist.length === 0) return 'new';
+    const last = hist[hist.length - 1];
+    const prevSpeed = Number.isFinite(Number(last.speed)) ? Number(last.speed) : 0;
+    const nowSpeed = Number.isFinite(Number(currentSpeed)) ? Number(currentSpeed) : 0;
+    const delta = nowSpeed - prevSpeed;
+    if (delta > 3) return 'up';
+    if (delta < -3) return 'down';
+    return 'stable';
+}
+
+async function saveHistory(items) {
+    const rows = Array.isArray(items) ? items : [];
+    if (rows.length === 0) return;
+    const now = Date.now();
+    rows.forEach((item) => {
+        if (!item || !item.ip) return;
+        const key = String(item.ip).trim();
+        if (!key) return;
+        if (!Array.isArray(dbData.test_history[key])) dbData.test_history[key] = [];
+        dbData.test_history[key].push({
+            ts: now,
+            ping: Number.isFinite(Number(item.ping)) ? Number(item.ping) : null,
+            speed: Number.isFinite(Number(item.speed)) ? Number(item.speed) : null,
+            loss: Number.isFinite(Number(item.loss)) ? Number(item.loss) : null
+        });
+        if (dbData.test_history[key].length > 20) {
+            dbData.test_history[key] = dbData.test_history[key].slice(-20);
+        }
+    });
+    await saveDb();
+}
+
+function getAdaptiveConfig(baseConfig, runtimeOptions, targetsCount) {
+    const cfg = { ...baseConfig };
+    const opts = runtimeOptions || {};
+    const profile = String(opts.profile || '').trim();
+    const mode = String(opts.performanceMode || 'auto').trim();
+    const mobileLikely = profile.includes('mobile');
+    const shouldAdapt = mode === 'mobile' || (mode === 'auto' && mobileLikely);
+    if (!shouldAdapt) return cfg;
+
+    cfg.n = clamp(Math.round(cfg.n * 0.35), 24, 96);
+    cfg.t = clamp(Math.round(cfg.t * 0.6), 1, 3);
+    cfg.dt = clamp(Math.round(cfg.dt * 0.6), 1, 3);
+    cfg.dn = clamp(Math.round(cfg.dn * 0.5), 1, 5);
+    cfg.topN = clamp(Math.round(cfg.topN * 0.5), 8, 25);
+    if (targetsCount > 0 && targetsCount <= 3) cfg.dn = 1;
+    return cfg;
 }
 
 const cfGlobalDnsServers = [
@@ -426,26 +559,31 @@ async function resolveTargets(targets) {
 }
 
 app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
-    req.setTimeout(300000); 
-    let rawTargets = [];
+    req.setTimeout(300000);
     const taskId = (req.body && req.body.taskId) || crypto.randomUUID();
     const mixedRegex = /(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)|(?:[a-zA-Z0-9][-a-zA-Z0-9]{0,62}\.)+[a-zA-Z]{2,}/g;
+    const runtimeOptions = req.body?.runtimeOptions || {};
+    const parseTimeoutMs = clamp(Number(runtimeOptions.parseTimeoutSec) || 25, 5, 120) * 1000;
+    const totalTimeoutMs = clamp(Number(runtimeOptions.totalTimeoutSec) || 150, 20, 600) * 1000;
+    const incremental = Boolean(runtimeOptions.incremental);
     sendProgress(taskId, { state: 'start', phase: '准备中', message: '测速任务初始化中...' });
 
+    let rawTargets = [];
     if (req.file) {
         const content = req.file.buffer.toString('utf-8');
         rawTargets = [...new Set(content.match(mixedRegex) || [])];
     } else if (req.body.targetIps) {
-        if (Array.isArray(req.body.targetIps)) {
-            rawTargets = req.body.targetIps;
-        } else if (typeof req.body.targetIps === 'string') {
-            try { rawTargets = JSON.parse(req.body.targetIps); } catch(e) {}
+        if (Array.isArray(req.body.targetIps)) rawTargets = req.body.targetIps;
+        else if (typeof req.body.targetIps === 'string') {
+            try { rawTargets = JSON.parse(req.body.targetIps); } catch {}
         }
     }
 
-    const cfstConfig = await getCfstConfig();
+    const baseConfig = await getCfstConfig();
+    const cfstConfig = getAdaptiveConfig(baseConfig, runtimeOptions, rawTargets.length);
     const args = [];
     let inputIps = null;
+
     args.push('-n', String(cfstConfig.n));
     args.push('-t', String(cfstConfig.t));
     args.push('-tp', String(cfstConfig.tp));
@@ -462,20 +600,38 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
     if (cfstConfig.allip) args.push('-allip');
     if (cfstConfig.debug) args.push('-debug');
 
-    if (rawTargets && rawTargets.length > 0) {
+    if (rawTargets.length > 0) {
         sendProgress(taskId, { state: 'running', phase: '解析目标', message: `正在解析 ${rawTargets.length} 个输入目标...` });
-        const resolvedIps = await resolveTargets(rawTargets);
-        if (resolvedIps.length === 0) {
-            sendProgress(taskId, { state: 'error', phase: '解析失败', message: '输入的目标无法解析出有效 IPv4' });
+        let resolvedIps;
+        try {
+            resolvedIps = await withTimeout(resolveTargets(rawTargets), parseTimeoutMs, '解析超时');
+        } catch (e) {
+            sendProgress(taskId, { state: 'error', phase: '解析失败', message: e.message || '解析超时' });
             closeProgress(taskId);
-            return res.json({ success: false, msg: '输入的目标无法解析出有效 IPv4' });
+            return res.json({ success: false, msg: e.message || '解析失败' });
         }
-        inputIps = new Set(resolvedIps);
-        args.push('-ip', resolvedIps.join(','));
+        if (!Array.isArray(resolvedIps) || resolvedIps.length === 0) {
+            sendProgress(taskId, { state: 'error', phase: '解析失败', message: '输入目标未解析出有效 IPv4' });
+            closeProgress(taskId);
+            return res.json({ success: false, msg: '输入目标未解析出有效 IPv4' });
+        }
+
+        let finalIps = [...new Set(resolvedIps)];
+        if (incremental && dbData.last_targets.length > 0) {
+            const previous = new Set(dbData.last_targets);
+            const newOnes = finalIps.filter(ip => !previous.has(ip));
+            const reused = finalIps.filter(ip => previous.has(ip)).slice(0, 20);
+            finalIps = [...new Set([...newOnes, ...reused])];
+        }
+        dbData.last_targets = finalIps.slice(0, 500);
+        await saveDb();
+
+        inputIps = new Set(finalIps);
+        args.push('-ip', finalIps.join(','));
         args.push('-url', cfstConfig.url);
         args.push('-dt', String(cfstConfig.dt));
-        args.push('-dn', String(resolvedIps.length <= 1 ? cfstConfig.dnSingle : cfstConfig.dn));
-        sendProgress(taskId, { state: 'running', phase: '准备测速', message: `解析完成，开始测试 ${resolvedIps.length} 个 IP...` });
+        args.push('-dn', String(finalIps.length <= 1 ? cfstConfig.dnSingle : cfstConfig.dn));
+        sendProgress(taskId, { state: 'running', phase: '准备测速', message: `解析完成，开始测试 ${finalIps.length} 个 IP...` });
     } else {
         args.push('-url', cfstConfig.url);
         args.push('-dt', String(cfstConfig.dt));
@@ -483,7 +639,26 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
         sendProgress(taskId, { state: 'running', phase: '准备测速', message: '未指定目标，开始测试默认节点库...' });
     }
 
+    let replied = false;
+    const finishWithError = (code, msg, phase = '执行失败') => {
+        if (replied) return;
+        replied = true;
+        sendProgress(taskId, { state: 'error', phase, message: msg });
+        closeProgress(taskId);
+        res.status(code).json({ success: false, msg });
+    };
+    const finishWithSuccess = (data) => {
+        if (replied) return;
+        replied = true;
+        sendProgress(taskId, { state: 'done', phase: '完成', message: `测速完成，共获得 ${data.length} 个节点`, percent: 100, current: 1, total: 1 });
+        closeProgress(taskId);
+        res.json({ success: true, data, meta: { adaptive: cfstConfig.n !== baseConfig.n, incremental } });
+    };
+
     const child = spawn('./cfst', args, { cwd: __dirname });
+    const watchdog = setTimeout(() => {
+        try { child.kill('SIGKILL'); } catch {}
+    }, totalTimeoutMs);
     let stdoutBuffer = '';
 
     child.stdout.on('data', (chunk) => {
@@ -497,37 +672,28 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
     });
 
     child.stderr.on('data', (chunk) => {
-        const raw = chunk.toString();
-        const lines = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+        const lines = chunk.toString().split(/\r?\n/).map(s => s.trim()).filter(Boolean);
         lines.forEach((line) => {
             const parsed = parseProgressLine(line);
             if (parsed) return sendProgress(taskId, parsed);
-            const lower = line.toLowerCase();
-            if (lower.includes('error') || lower.includes('fail') || line.includes('失败')) {
+            if (line.toLowerCase().includes('error') || line.toLowerCase().includes('fail') || line.includes('失败')) {
                 sendProgress(taskId, { state: 'running', phase: '引擎错误', message: line });
             }
         });
     });
 
     child.on('error', () => {
-        sendProgress(taskId, { state: 'error', phase: '执行失败', message: '底层引擎执行失败' });
-        closeProgress(taskId);
-        res.status(500).json({ success: false, msg: '底层引擎执行失败' });
+        clearTimeout(watchdog);
+        finishWithError(500, '底层引擎执行失败');
     });
 
     child.on('close', async (code) => {
-        if (code !== 0) {
-            sendProgress(taskId, { state: 'error', phase: '执行失败', message: `底层引擎退出码异常: ${code}` });
-            closeProgress(taskId);
-            return res.status(500).json({ success: false, msg: '底层引擎执行失败' });
-        }
+        clearTimeout(watchdog);
+        if (replied) return;
+        if (code !== 0) return finishWithError(500, `底层引擎退出码异常: ${code}`);
 
         const csvPath = path.join(__dirname, 'result.csv');
-        if (!fs.existsSync(csvPath)) {
-            sendProgress(taskId, { state: 'error', phase: '结果解析', message: '未找到结果文件' });
-            closeProgress(taskId);
-            return res.status(500).json({ success: false, msg: '未找到结果文件' });
-        }
+        if (!fs.existsSync(csvPath)) return finishWithError(500, '未找到结果文件', '结果解析');
 
         sendProgress(taskId, { state: 'running', phase: '结果解析', message: '测速完成，正在解析结果...' });
         const csvData = fs.readFileSync(csvPath, 'utf-8');
@@ -537,29 +703,27 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
             if (!lines[i]) continue;
             const values = lines[i].split(',');
             results.push({
-                ip: values[0], loss: parseFloat(values[3]), ping: parseFloat(values[4]),
-                speed: parseFloat(values[5]), csvColo: values[6] ? values[6].replace('\r', '').trim() : null
+                ip: values[0],
+                loss: parseFloat(values[3]),
+                ping: parseFloat(values[4]),
+                speed: parseFloat(values[5]),
+                csvColo: values[6] ? values[6].replace('\r', '').trim() : null
             });
         }
-        let filtered = results;
-        if (inputIps) filtered = results.filter((r) => inputIps.has(r.ip));
+
+        let filtered = inputIps ? results.filter((r) => inputIps.has(r.ip)) : results;
         if (cfstConfig.disableDownload) {
-            filtered.sort((a, b) => {
-                const ap = Number.isFinite(Number(a.ping)) ? Number(a.ping) : 999999;
-                const bp = Number.isFinite(Number(b.ping)) ? Number(b.ping) : 999999;
-                if (ap !== bp) return ap - bp;
-                const al = Number.isFinite(Number(a.loss)) ? Number(a.loss) : 999999;
-                const bl = Number.isFinite(Number(b.loss)) ? Number(b.loss) : 999999;
-                return al - bl;
-            });
+            filtered.sort((a, b) => (Number(a.ping) || 999999) - (Number(b.ping) || 999999));
         } else {
-            filtered.sort((a, b) => {
-                const as = Number.isFinite(Number(a.speed)) ? Number(a.speed) : -1;
-                const bs = Number.isFinite(Number(b.speed)) ? Number(b.speed) : -1;
-                return bs - as;
-            });
+            filtered.sort((a, b) => (Number(b.speed) || -1) - (Number(a.speed) || -1));
         }
-        const topResults = filtered.slice(0, cfstConfig.topN);
+
+        const topResults = filtered.slice(0, cfstConfig.topN).map((item) => ({
+            ...item,
+            healthScore: computeHealthScore(item),
+            trend: computeTrend(item.ip, item.speed)
+        }));
+        topResults.sort((a, b) => b.healthScore - a.healthScore);
 
         const pendingRegionIps = [];
         topResults.forEach((item) => {
@@ -575,9 +739,9 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
                 await getColoCached(ip);
             }).catch(() => {});
         }
-        sendProgress(taskId, { state: 'done', phase: '完成', message: `测速完成，共获得 ${topResults.length} 个节点`, percent: 100, current: 1, total: 1 });
-        closeProgress(taskId);
-        res.json({ success: true, data: topResults });
+
+        await saveHistory(topResults);
+        finishWithSuccess(topResults);
     });
 });
 
