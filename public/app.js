@@ -10,6 +10,7 @@
         
         const ipInput = document.getElementById('ip-input');
         const ipCount = document.getElementById('ip-count');
+        const allowCnameInput = document.getElementById('allow-cname-input');
         const fileInput = document.getElementById('file-input');
         const importCsvBtn = document.getElementById('import-csv-btn');
         const clearInputBtn = document.getElementById('clear-input-btn');
@@ -72,6 +73,7 @@
         let progressPollTimer = null;
         let lastProgressPercent = 0;
         let regionHydrationSeq = 0;
+        const ipRegexGlobal = /(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)/g;
         const mixedRegex = /(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)|(?:[a-zA-Z0-9][-a-zA-Z0-9]{0,62}\.)+[a-zA-Z]{2,}/g;
 
         // --- 基础工具 ---
@@ -462,16 +464,26 @@
 
         // --- 🚀 新版输入区联动逻辑 ---
         function extractAndUpdateInput(text) {
-            const matches = text.match(mixedRegex) || [];
+            const sourceText = String(text || '');
+            const matcher = allowCnameInput && allowCnameInput.checked ? mixedRegex : ipRegexGlobal;
+            const matches = sourceText.match(matcher) || [];
             parsedTargets = [...new Set(matches)];
             ipCount.innerText = parsedTargets.length;
-            if (parsedTargets.length > 0) ipInput.value = parsedTargets.join('\n');
-            else ipInput.value = text; // 没找到就保持原样
+            if (allowCnameInput && allowCnameInput.checked) {
+                if (parsedTargets.length > 0) ipInput.value = parsedTargets.join('\n');
+                else ipInput.value = sourceText;
+            } else {
+                ipInput.value = parsedTargets.join('\n');
+            }
         }
 
         ipInput.addEventListener('paste', () => setTimeout(() => extractAndUpdateInput(ipInput.value), 10));
         ipInput.addEventListener('blur', () => extractAndUpdateInput(ipInput.value));
         clearInputBtn.addEventListener('click', () => { ipInput.value = ''; parsedTargets = []; ipCount.innerText = '0'; });
+        allowCnameInput.addEventListener('change', () => {
+            extractAndUpdateInput(ipInput.value);
+            showToast(allowCnameInput.checked ? '✅ 已切换到 CNAME 模式（支持域名）' : '✅ 已切换到 IP 模式（自动移除非 IP）');
+        });
 
         // 神级交互：点击导入CSV直接在前端提取并展示到输入框
         importCsvBtn.addEventListener('click', () => fileInput.click());
@@ -482,8 +494,8 @@
             reader.onload = function(evt) {
                 const text = evt.target.result;
                 extractAndUpdateInput(text);
-                if (parsedTargets.length > 0) showToast(`✅ 成功从文件提取 ${parsedTargets.length} 个目标`);
-                else showToast('❌ 未在文件中找到有效 IP 或域名');
+                if (parsedTargets.length > 0) showToast(`✅ 成功提取 ${parsedTargets.length} 个${allowCnameInput.checked ? '目标' : 'IP'}`);
+                else showToast(`❌ 未在文件中找到有效${allowCnameInput.checked ? ' IP 或域名' : ' IP'}`);
             };
             reader.readAsText(file);
             fileInput.value = ''; // 重置 file input
@@ -653,6 +665,7 @@
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         targetIps: parsedTargets,
+                        inputMode: allowCnameInput.checked ? 'cname' : 'ip',
                         taskId,
                         runtimeOptions: {
                             incremental: incrementalMode.checked,

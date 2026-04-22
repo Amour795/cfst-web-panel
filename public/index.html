@@ -168,7 +168,12 @@
             <div class="glass-card input-area">
                 <div class="input-header">
                     <span>目标节点输入 (IP / 域名)</span>
-                    <span class="ip-stats">已识别: <span id="ip-count">0</span></span>
+                    <div style="display:flex; align-items:center; gap:0.6rem; flex-wrap: wrap; justify-content:flex-end;">
+                        <label style="font-size:0.75rem; color:#475569; font-weight:700;">
+                            <input id="allow-cname-input" type="checkbox"> CNAME 解析
+                        </label>
+                        <span class="ip-stats">已识别: <span id="ip-count">0</span></span>
+                    </div>
                 </div>
                 
                 <textarea id="ip-input" placeholder="支持直接粘贴内容或导入 CSV。&#10;系统会自动提取并排版，例如：&#10;1.0.0.1&#10;cdn.cloudflare.net"></textarea>
@@ -280,17 +285,17 @@
                 <div class="setting-row">
                     <label for="cfst-dt">下载测速时长（秒）</label>
                     <input id="cfst-dt" type="number" min="1" max="30" step="1">
-                    <div class="setting-hint">太短容易测不出真实速度，建议 5~10。</div>
+                    <div class="setting-hint">对应 cfst `-dt`：单个 IP 下载测速的最长时间。太短容易不准，太长会拖慢整体；手机建议 2~5，桌面建议 5~10。</div>
                 </div>
                 <div class="setting-row">
                     <label for="cfst-dn">下载测速数量（多 IP）</label>
                     <input id="cfst-dn" type="number" min="1" max="50" step="1">
-                    <div class="setting-hint">从低延迟开始挑选 dn 个做下载测速。</div>
+                    <div class="setting-hint">对应 cfst `-dn`：延迟测速并排序后，从低延迟队列里做下载测速的目标数量上限。注意它不是“输入 IP 数量”，而是“进入下载阶段的数量目标”；当候选队列不足或被条件过滤时，最终结果可能小于该值。</div>
                 </div>
                 <div class="setting-row">
                     <label for="cfst-dn-single">下载测速数量（单 IP）</label>
                     <input id="cfst-dn-single" type="number" min="1" max="10" step="1">
-                    <div class="setting-hint">只测一个 IP 时建议为 1，避免额外耗时。</div>
+                    <div class="setting-hint">仅在你只输入 1 个目标时使用。对应单目标场景下的 `-dn`，通常设为 1 即可，避免重复下载测速浪费时间。</div>
                 </div>
                 <div class="setting-row">
                     <label for="cfst-tl">平均延迟上限（ms）</label>
@@ -310,11 +315,11 @@
                 <div class="setting-row">
                     <label for="cfst-sl">下载速度下限（MB/s）</label>
                     <input id="cfst-sl" type="number" min="0" max="9999" step="0.01">
-                    <div class="setting-hint">只输出高于该速度的 IP，填 0 表示不限制。</div>
+                    <div class="setting-hint">对应 cfst `-sl`：仅保留下载速度高于该阈值的结果。若设置过高，可能出现“测速很多但结果很少”；若与 `-dn` 联动，cfst 会尽量凑够数量，否则会测完整个队列后提前结束。</div>
                 </div>
                 <div class="setting-row">
                     <label><input id="cfst-disable-download" type="checkbox"> 禁用下载测速（仅按延迟排序）</label>
-                    <div class="setting-hint">开启后更快，但结果不包含真实下载速度。</div>
+                    <div class="setting-hint">对应 cfst `-dd`：开启后跳过下载测速，`-dn/-dt/-sl` 基本不再生效，结果按延迟/丢包排序，速度会明显更快。</div>
                 </div>
                 <div class="setting-row">
                     <label><input id="cfst-allip" type="checkbox"> 测速全部 IP（仅 IPv4）</label>

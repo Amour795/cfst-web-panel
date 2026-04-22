@@ -594,6 +594,7 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
     const taskId = (req.body && req.body.taskId) || crypto.randomUUID();
     const mixedRegex = /(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)|(?:[a-zA-Z0-9][-a-zA-Z0-9]{0,62}\.)+[a-zA-Z]{2,}/g;
     const runtimeOptions = req.body?.runtimeOptions || {};
+    const inputMode = String(req.body?.inputMode || 'ip').toLowerCase();
     const parseTimeoutMs = clamp(Number(runtimeOptions.parseTimeoutSec) || 25, 5, 120) * 1000;
     const totalTimeoutMs = clamp(Number(runtimeOptions.totalTimeoutSec) || 150, 20, 600) * 1000;
     const incremental = Boolean(runtimeOptions.incremental);
@@ -601,6 +602,7 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
     logTask(taskId, 'start-request', {
         hasFile: Boolean(req.file),
         hasTargetIps: Boolean(req.body?.targetIps),
+        inputMode,
         runtimeOptions
     });
 
@@ -614,7 +616,33 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
             try { rawTargets = JSON.parse(req.body.targetIps); } catch {}
         }
     }
-    logTask(taskId, 'raw-targets-loaded', { count: rawTargets.length });
+    rawTargets = rawTargets.map(s => String(s || '').trim()).filter(Boolean);
+    if (inputMode !== 'ip' && inputMode !== 'cname') {
+        logTask(taskId, 'input-mode-invalid', { inputMode });
+        closeProgress(taskId);
+        return res.status(400).json({ success: false, msg: '输入模式无效，仅支持 ip 或 cname' });
+    }
+
+    const ipRegexExact = /^(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)$/;
+    const domainRegexExact = /^(?:[a-zA-Z0-9](?:[-a-zA-Z0-9]{0,62})\.)+[a-zA-Z]{2,}$/;
+    if (inputMode === 'ip') {
+        const invalid = rawTargets.filter((item) => !ipRegexExact.test(item));
+        if (invalid.length > 0) {
+            logTask(taskId, 'input-mode-mismatch', { mode: inputMode, invalidCount: invalid.length, sample: invalid.slice(0, 3) });
+            sendProgress(taskId, { state: 'error', phase: '输入校验', message: `IP 模式下检测到 ${invalid.length} 个非 IP 内容` });
+            closeProgress(taskId);
+            return res.status(400).json({ success: false, msg: `当前为 IP 模式，检测到 ${invalid.length} 个非 IP 值，请关闭 CNAME 或移除域名后重试` });
+        }
+    } else {
+        const invalid = rawTargets.filter((item) => !ipRegexExact.test(item) && !domainRegexExact.test(item));
+        if (invalid.length > 0) {
+            logTask(taskId, 'input-mode-mismatch', { mode: inputMode, invalidCount: invalid.length, sample: invalid.slice(0, 3) });
+            sendProgress(taskId, { state: 'error', phase: '输入校验', message: `CNAME 模式下检测到 ${invalid.length} 个非法值` });
+            closeProgress(taskId);
+            return res.status(400).json({ success: false, msg: `当前为 CNAME 模式，检测到 ${invalid.length} 个非法值（既不是 IP 也不是域名）` });
+        }
+    }
+    logTask(taskId, 'raw-targets-loaded', { count: rawTargets.length, inputMode });
 
     const baseConfig = await getCfstConfig();
     const cfstConfig = getAdaptiveConfig(baseConfig, runtimeOptions, rawTargets.length);
