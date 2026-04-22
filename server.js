@@ -194,21 +194,51 @@ async function setSetting(key, value) {
 
 async function getCfstConfig() {
     const defaults = {
+        n: 200,
+        t: 4,
+        tp: 443,
         url: 'https://speed.cloudflare.com/__down?bytes=20000000',
+        mode: 'tcp',
+        httpingCode: 200,
+        cfcolo: '',
         dt: 5,
         dn: 10,
         dnSingle: 1,
+        tl: 9999,
+        tll: 0,
+        tlr: 1,
+        sl: 0,
+        disableDownload: false,
+        allip: false,
+        debug: false,
         topN: 50
     };
     const raw = await getSetting('cfst_config');
     if (!raw) return defaults;
     try {
         const parsed = JSON.parse(raw);
+        const mode = parsed.mode === 'http' ? 'http' : 'tcp';
+        const cfcolo = typeof parsed.cfcolo === 'string' ? parsed.cfcolo.trim() : '';
+        const cfcoloNormalized = cfcolo && /^[A-Za-z]{2,5}(,[A-Za-z]{2,5})*$/.test(cfcolo) ? cfcolo : '';
+        const tlr = Number(parsed.tlr);
         return {
+            n: Number.isFinite(Number(parsed.n)) ? Math.max(1, Math.min(1000, Number(parsed.n))) : defaults.n,
+            t: Number.isFinite(Number(parsed.t)) ? Math.max(1, Math.min(20, Number(parsed.t))) : defaults.t,
+            tp: Number.isFinite(Number(parsed.tp)) ? Math.max(1, Math.min(65535, Number(parsed.tp))) : defaults.tp,
             url: typeof parsed.url === 'string' && parsed.url.trim() ? parsed.url.trim() : defaults.url,
+            mode,
+            httpingCode: Number.isFinite(Number(parsed.httpingCode)) ? Math.max(100, Math.min(599, Number(parsed.httpingCode))) : defaults.httpingCode,
+            cfcolo: cfcoloNormalized,
             dt: Number.isFinite(Number(parsed.dt)) ? Math.max(1, Math.min(30, Number(parsed.dt))) : defaults.dt,
             dn: Number.isFinite(Number(parsed.dn)) ? Math.max(1, Math.min(50, Number(parsed.dn))) : defaults.dn,
             dnSingle: Number.isFinite(Number(parsed.dnSingle)) ? Math.max(1, Math.min(10, Number(parsed.dnSingle))) : defaults.dnSingle,
+            tl: Number.isFinite(Number(parsed.tl)) ? Math.max(0, Math.min(9999, Number(parsed.tl))) : defaults.tl,
+            tll: Number.isFinite(Number(parsed.tll)) ? Math.max(0, Math.min(9999, Number(parsed.tll))) : defaults.tll,
+            tlr: Number.isFinite(tlr) ? Math.max(0, Math.min(1, tlr)) : defaults.tlr,
+            sl: Number.isFinite(Number(parsed.sl)) ? Math.max(0, Math.min(9999, Number(parsed.sl))) : defaults.sl,
+            disableDownload: Boolean(parsed.disableDownload),
+            allip: Boolean(parsed.allip),
+            debug: Boolean(parsed.debug),
             topN: Number.isFinite(Number(parsed.topN)) ? Math.max(1, Math.min(200, Number(parsed.topN))) : defaults.topN
         };
     } catch {
@@ -331,10 +361,23 @@ app.get('/api/settings/cfst', async (req, res) => {
 app.post('/api/settings/cfst', async (req, res) => {
     const body = req.body || {};
     const cfg = {
+        n: body.n,
+        t: body.t,
+        tp: body.tp,
         url: typeof body.url === 'string' ? body.url.trim() : '',
+        mode: body.mode,
+        httpingCode: body.httpingCode,
+        cfcolo: typeof body.cfcolo === 'string' ? body.cfcolo.trim() : '',
         dt: body.dt,
         dn: body.dn,
         dnSingle: body.dnSingle,
+        tl: body.tl,
+        tll: body.tll,
+        tlr: body.tlr,
+        sl: body.sl,
+        disableDownload: Boolean(body.disableDownload),
+        allip: Boolean(body.allip),
+        debug: Boolean(body.debug),
         topN: body.topN
     };
     try {
@@ -423,6 +466,21 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
     const cfstConfig = await getCfstConfig();
     const args = [];
     let inputIps = null;
+    args.push('-n', String(cfstConfig.n));
+    args.push('-t', String(cfstConfig.t));
+    args.push('-tp', String(cfstConfig.tp));
+    args.push('-tl', String(cfstConfig.tl));
+    args.push('-tll', String(cfstConfig.tll));
+    args.push('-tlr', String(cfstConfig.tlr));
+    args.push('-sl', String(cfstConfig.sl));
+    if (cfstConfig.mode === 'http') {
+        args.push('-httping');
+        args.push('-httping-code', String(cfstConfig.httpingCode));
+        if (cfstConfig.cfcolo) args.push('-cfcolo', cfstConfig.cfcolo);
+    }
+    if (cfstConfig.disableDownload) args.push('-dd');
+    if (cfstConfig.allip) args.push('-allip');
+    if (cfstConfig.debug) args.push('-debug');
 
     if (rawTargets && rawTargets.length > 0) {
         sendProgress(taskId, { state: 'running', phase: '解析目标', message: `正在解析 ${rawTargets.length} 个输入目标...` });
@@ -505,7 +563,22 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
         }
         let filtered = results;
         if (inputIps) filtered = results.filter((r) => inputIps.has(r.ip));
-        filtered.sort((a, b) => b.speed - a.speed);
+        if (cfstConfig.disableDownload) {
+            filtered.sort((a, b) => {
+                const ap = Number.isFinite(Number(a.ping)) ? Number(a.ping) : 999999;
+                const bp = Number.isFinite(Number(b.ping)) ? Number(b.ping) : 999999;
+                if (ap !== bp) return ap - bp;
+                const al = Number.isFinite(Number(a.loss)) ? Number(a.loss) : 999999;
+                const bl = Number.isFinite(Number(b.loss)) ? Number(b.loss) : 999999;
+                return al - bl;
+            });
+        } else {
+            filtered.sort((a, b) => {
+                const as = Number.isFinite(Number(a.speed)) ? Number(a.speed) : -1;
+                const bs = Number.isFinite(Number(b.speed)) ? Number(b.speed) : -1;
+                return bs - as;
+            });
+        }
         const topResults = filtered.slice(0, cfstConfig.topN);
 
         const promises = topResults.map(async (item) => {

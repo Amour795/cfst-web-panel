@@ -104,6 +104,7 @@
         #toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
 
         body.dark { background-color: #0b1220; color: #e5e7eb; }
+        body.dark .header h1 { color: #e5e7eb; }
         body.dark .header p { color: #94a3b8; }
         body.dark .tab-switcher { background: rgba(148, 163, 184, 0.18); }
         body.dark .tab-btn { color: #cbd5e1; }
@@ -117,10 +118,16 @@
         body.dark .setting-hint { color: #94a3b8; }
         body.dark .tool-btn { border-color: rgba(148, 163, 184, 0.25); color: #cbd5e1; }
         body.dark .tool-btn:hover { background: rgba(148, 163, 184, 0.12); }
+        body.dark .tool-btn.primary { background: rgba(165, 180, 252, 0.16); border-color: rgba(165, 180, 252, 0.28); color: #c7d2fe; }
+        body.dark .tool-btn.primary:hover { background: rgba(165, 180, 252, 0.22); border-color: rgba(165, 180, 252, 0.34); }
         body.dark .status-panel { background: linear-gradient(180deg, rgba(30, 41, 59, 0.75), rgba(15, 23, 42, 0.6)); border-color: rgba(148, 163, 184, 0.18); color: #a5b4fc; }
         body.dark .status-title { color: #c7d2fe; }
         body.dark .status-sub { color: rgba(165, 180, 252, 0.9); }
         body.dark .progress-track { background: rgba(148, 163, 184, 0.22); }
+        body.dark .action-bar { background: rgba(2, 6, 23, 0.35); border-bottom-color: rgba(148, 163, 184, 0.16); }
+        body.dark .action-bar div { color: #cbd5e1 !important; }
+        body.dark .action-btn { color: #e5e7eb; }
+        body.dark .action-btn:disabled { background-color: rgba(148, 163, 184, 0.22) !important; color: rgba(226, 232, 240, 0.65); }
         body.dark th { background-color: rgba(30, 41, 59, 0.35); color: #94a3b8; border-bottom-color: rgba(148, 163, 184, 0.16); }
         body.dark td { border-bottom-color: rgba(148, 163, 184, 0.12); color: #e5e7eb; }
         body.dark tr:hover td { background-color: rgba(148, 163, 184, 0.08); }
@@ -203,27 +210,97 @@
             <div class="glass-card settings-area" style="margin-bottom: 0;">
                 <div class="setting-row">
                     <label>测速引擎（cfst）</label>
-                    <div class="setting-hint">修改后立即生效，用于下载测速与筛选数量。</div>
+                    <div class="setting-hint">修改后立即生效。建议先从默认值开始，逐步调优。</div>
+                </div>
+                <div class="setting-row">
+                    <label for="cfst-mode">延迟测速模式</label>
+                    <select id="cfst-mode">
+                        <option value="tcp">TCPing（默认）</option>
+                        <option value="http">HTTPing（需可访问 URL）</option>
+                    </select>
+                    <div class="setting-hint">HTTPing 对 URL 可用性更敏感，适合做地区筛选。</div>
+                </div>
+                <div id="cfst-httping-box" class="setting-row hidden">
+                    <label for="cfst-httping-code">HTTPing 有效状态码</label>
+                    <input id="cfst-httping-code" type="number" min="100" max="599" step="1">
+                    <div class="setting-hint">仅在 HTTPing 模式下生效。</div>
+                </div>
+                <div id="cfst-cfcolo-box" class="setting-row hidden">
+                    <label for="cfst-cfcolo">限制地区（IATA 码，可选）</label>
+                    <input id="cfst-cfcolo" type="text" placeholder="HKG,NRT,LAX,SJC">
+                    <div class="setting-hint">仅在 HTTPing 模式下生效，英文逗号分隔。</div>
+                </div>
+                <div class="setting-row">
+                    <label for="cfst-tp">测速端口</label>
+                    <input id="cfst-tp" type="number" min="1" max="65535" step="1">
+                    <div class="setting-hint">一般保持 443，不确定不要改。</div>
+                </div>
+                <div class="setting-row">
+                    <label for="cfst-n">延迟测速线程（-n）</label>
+                    <input id="cfst-n" type="number" min="1" max="1000" step="1">
+                    <div class="setting-hint">越高越快但更吃 CPU/网络；性能弱设备不要太高。</div>
+                </div>
+                <div class="setting-row">
+                    <label for="cfst-t">延迟测速次数（-t）</label>
+                    <input id="cfst-t" type="number" min="1" max="20" step="1">
+                    <div class="setting-hint">次数越多越稳，但总体更慢。</div>
                 </div>
                 <div class="setting-row">
                     <label for="cfst-url">下载测速 URL</label>
                     <input id="cfst-url" type="text" placeholder="https://speed.cloudflare.com/__down?bytes=20000000">
+                    <div class="setting-hint">默认地址不保证可用性，建议自建。</div>
                 </div>
                 <div class="setting-row">
                     <label for="cfst-dt">下载测速时长（秒）</label>
                     <input id="cfst-dt" type="number" min="1" max="30" step="1">
+                    <div class="setting-hint">太短容易测不出真实速度，建议 5~10。</div>
                 </div>
                 <div class="setting-row">
                     <label for="cfst-dn">下载测速数量（多 IP）</label>
                     <input id="cfst-dn" type="number" min="1" max="50" step="1">
+                    <div class="setting-hint">从低延迟开始挑选 dn 个做下载测速。</div>
                 </div>
                 <div class="setting-row">
                     <label for="cfst-dn-single">下载测速数量（单 IP）</label>
                     <input id="cfst-dn-single" type="number" min="1" max="10" step="1">
+                    <div class="setting-hint">只测一个 IP 时建议为 1，避免额外耗时。</div>
+                </div>
+                <div class="setting-row">
+                    <label for="cfst-tl">平均延迟上限（ms）</label>
+                    <input id="cfst-tl" type="number" min="0" max="9999" step="1">
+                    <div class="setting-hint">只保留低于该阈值的 IP。</div>
+                </div>
+                <div class="setting-row">
+                    <label for="cfst-tll">平均延迟下限（ms）</label>
+                    <input id="cfst-tll" type="number" min="0" max="9999" step="1">
+                    <div class="setting-hint">只保留高于该阈值的 IP。</div>
+                </div>
+                <div class="setting-row">
+                    <label for="cfst-tlr">丢包率上限（0~1）</label>
+                    <input id="cfst-tlr" type="number" min="0" max="1" step="0.01">
+                    <div class="setting-hint">填 0 会过滤掉任何丢包。</div>
+                </div>
+                <div class="setting-row">
+                    <label for="cfst-sl">下载速度下限（MB/s）</label>
+                    <input id="cfst-sl" type="number" min="0" max="9999" step="0.01">
+                    <div class="setting-hint">只输出高于该速度的 IP，填 0 表示不限制。</div>
+                </div>
+                <div class="setting-row">
+                    <label><input id="cfst-disable-download" type="checkbox"> 禁用下载测速（仅按延迟排序）</label>
+                    <div class="setting-hint">开启后更快，但结果不包含真实下载速度。</div>
+                </div>
+                <div class="setting-row">
+                    <label><input id="cfst-allip" type="checkbox"> 测速全部 IP（仅 IPv4）</label>
+                    <div class="setting-hint">开启后会更慢，但覆盖更完整。</div>
+                </div>
+                <div class="setting-row">
+                    <label><input id="cfst-debug" type="checkbox"> 调试输出（debug）</label>
+                    <div class="setting-hint">仅用于排错，日志会更多。</div>
                 </div>
                 <div class="setting-row">
                     <label for="cfst-topn">结果返回 TopN</label>
                     <input id="cfst-topn" type="number" min="1" max="200" step="1">
+                    <div class="setting-hint">前端表格最多显示这些结果。</div>
                 </div>
                 <div class="setting-actions">
                     <button id="save-settings-btn" class="tool-btn primary">💾 保存设置</button>
@@ -305,10 +382,25 @@
         const selectedCountSpan = document.getElementById('selected-count');
         const toast = document.getElementById('toast');
         const themeMode = document.getElementById('theme-mode');
+        const cfstMode = document.getElementById('cfst-mode');
+        const cfstHttpingBox = document.getElementById('cfst-httping-box');
+        const cfstCfcoloBox = document.getElementById('cfst-cfcolo-box');
+        const cfstHttpingCodeInput = document.getElementById('cfst-httping-code');
+        const cfstCfcoloInput = document.getElementById('cfst-cfcolo');
+        const cfstTpInput = document.getElementById('cfst-tp');
+        const cfstNInput = document.getElementById('cfst-n');
+        const cfstTInput = document.getElementById('cfst-t');
         const cfstUrlInput = document.getElementById('cfst-url');
         const cfstDtInput = document.getElementById('cfst-dt');
         const cfstDnInput = document.getElementById('cfst-dn');
         const cfstDnSingleInput = document.getElementById('cfst-dn-single');
+        const cfstTlInput = document.getElementById('cfst-tl');
+        const cfstTllInput = document.getElementById('cfst-tll');
+        const cfstTlrInput = document.getElementById('cfst-tlr');
+        const cfstSlInput = document.getElementById('cfst-sl');
+        const cfstDisableDownload = document.getElementById('cfst-disable-download');
+        const cfstAllip = document.getElementById('cfst-allip');
+        const cfstDebug = document.getElementById('cfst-debug');
         const cfstTopNInput = document.getElementById('cfst-topn');
         const saveSettingsBtn = document.getElementById('save-settings-btn');
         const resetSettingsBtn = document.getElementById('reset-settings-btn');
@@ -444,26 +536,66 @@
         tabFav.addEventListener('click', () => { if(currentView !== 'favorites') switchTab('favorites'); });
         tabSettings.addEventListener('click', () => { if(currentView !== 'settings') switchTab('settings'); });
 
+        function updateCfstModeVisibility() {
+            const mode = cfstMode.value || 'tcp';
+            if (mode === 'http') {
+                cfstHttpingBox.classList.remove('hidden');
+                cfstCfcoloBox.classList.remove('hidden');
+            } else {
+                cfstHttpingBox.classList.add('hidden');
+                cfstCfcoloBox.classList.add('hidden');
+            }
+        }
+
+        cfstMode.addEventListener('change', () => updateCfstModeVisibility());
+
         async function loadCfstConfig() {
             try {
                 const res = await fetch('/api/settings/cfst');
                 const json = await res.json();
                 if (!json.success) return;
                 const cfg = json.data || {};
+                cfstMode.value = cfg.mode || 'tcp';
+                cfstHttpingCodeInput.value = String(cfg.httpingCode ?? '');
+                cfstCfcoloInput.value = cfg.cfcolo || '';
+                cfstTpInput.value = String(cfg.tp ?? '');
+                cfstNInput.value = String(cfg.n ?? '');
+                cfstTInput.value = String(cfg.t ?? '');
                 cfstUrlInput.value = cfg.url || '';
                 cfstDtInput.value = String(cfg.dt ?? '');
                 cfstDnInput.value = String(cfg.dn ?? '');
                 cfstDnSingleInput.value = String(cfg.dnSingle ?? '');
+                cfstTlInput.value = String(cfg.tl ?? '');
+                cfstTllInput.value = String(cfg.tll ?? '');
+                cfstTlrInput.value = String(cfg.tlr ?? '');
+                cfstSlInput.value = String(cfg.sl ?? '');
+                cfstDisableDownload.checked = Boolean(cfg.disableDownload);
+                cfstAllip.checked = Boolean(cfg.allip);
+                cfstDebug.checked = Boolean(cfg.debug);
                 cfstTopNInput.value = String(cfg.topN ?? '');
+                updateCfstModeVisibility();
             } catch (e) {}
         }
 
         async function saveCfstConfig() {
             const payload = {
+                n: Number(cfstNInput.value),
+                t: Number(cfstTInput.value),
+                tp: Number(cfstTpInput.value),
                 url: cfstUrlInput.value || '',
+                mode: cfstMode.value || 'tcp',
+                httpingCode: Number(cfstHttpingCodeInput.value),
+                cfcolo: cfstCfcoloInput.value || '',
                 dt: Number(cfstDtInput.value),
                 dn: Number(cfstDnInput.value),
                 dnSingle: Number(cfstDnSingleInput.value),
+                tl: Number(cfstTlInput.value),
+                tll: Number(cfstTllInput.value),
+                tlr: Number(cfstTlrInput.value),
+                sl: Number(cfstSlInput.value),
+                disableDownload: cfstDisableDownload.checked,
+                allip: cfstAllip.checked,
+                debug: cfstDebug.checked,
                 topN: Number(cfstTopNInput.value)
             };
             try {
@@ -475,11 +607,25 @@
                 const json = await res.json();
                 if (json.success) {
                     const cfg = json.data || {};
+                    cfstMode.value = cfg.mode || 'tcp';
+                    cfstHttpingCodeInput.value = String(cfg.httpingCode ?? '');
+                    cfstCfcoloInput.value = cfg.cfcolo || '';
+                    cfstTpInput.value = String(cfg.tp ?? '');
+                    cfstNInput.value = String(cfg.n ?? '');
+                    cfstTInput.value = String(cfg.t ?? '');
                     cfstUrlInput.value = cfg.url || '';
                     cfstDtInput.value = String(cfg.dt ?? '');
                     cfstDnInput.value = String(cfg.dn ?? '');
                     cfstDnSingleInput.value = String(cfg.dnSingle ?? '');
+                    cfstTlInput.value = String(cfg.tl ?? '');
+                    cfstTllInput.value = String(cfg.tll ?? '');
+                    cfstTlrInput.value = String(cfg.tlr ?? '');
+                    cfstSlInput.value = String(cfg.sl ?? '');
+                    cfstDisableDownload.checked = Boolean(cfg.disableDownload);
+                    cfstAllip.checked = Boolean(cfg.allip);
+                    cfstDebug.checked = Boolean(cfg.debug);
                     cfstTopNInput.value = String(cfg.topN ?? '');
+                    updateCfstModeVisibility();
                     showToast('✅ 设置已保存');
                 } else {
                     showToast('❌ 保存失败: ' + (json.msg || '未知错误'));
@@ -491,10 +637,23 @@
 
         saveSettingsBtn.addEventListener('click', () => saveCfstConfig());
         resetSettingsBtn.addEventListener('click', () => {
+            cfstMode.value = 'tcp';
+            cfstHttpingCodeInput.value = '200';
+            cfstCfcoloInput.value = '';
+            cfstTpInput.value = '443';
+            cfstNInput.value = '200';
+            cfstTInput.value = '4';
             cfstUrlInput.value = 'https://speed.cloudflare.com/__down?bytes=20000000';
             cfstDtInput.value = '5';
             cfstDnInput.value = '10';
             cfstDnSingleInput.value = '1';
+            cfstTlInput.value = '9999';
+            cfstTllInput.value = '0';
+            cfstTlrInput.value = '1';
+            cfstSlInput.value = '0';
+            cfstDisableDownload.checked = false;
+            cfstAllip.checked = false;
+            cfstDebug.checked = false;
             cfstTopNInput.value = '50';
             saveCfstConfig();
         });
