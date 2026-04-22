@@ -24,7 +24,7 @@ warn() { echo -e "${YELLOW}⚠️  $1${NC}"; }
 fail() { echo -e "${RED}❌ $1${NC}"; }
 
 hr
-title "  🚀 CFST Web Panel 控制台 v2.2"
+title "  🚀 CFST Web Panel 控制台 v2.3"
 title "  ─────────────────────────"
 echo -e "${CYAN} SQLite 持久化 · 黑夜模式${NC}"
 hr
