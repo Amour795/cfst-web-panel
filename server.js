@@ -67,7 +67,23 @@ function sendProgress(taskId, payload) {
     const clients = progressClients.get(taskId);
     if (!clients) return;
     const message = `data: ${JSON.stringify(normalized)}\n\n`;
-    clients.forEach((res) => res.write(message));
+    const deadClients = [];
+    clients.forEach((res) => {
+        try {
+            if (res.writableEnded || res.destroyed) {
+                deadClients.push(res);
+                return;
+            }
+            res.write(message);
+        } catch (e) {
+            deadClients.push(res);
+            console.warn('[SSE] write failed:', e && e.message ? e.message : e);
+        }
+    });
+    if (deadClients.length > 0) {
+        deadClients.forEach((res) => clients.delete(res));
+        if (clients.size === 0) progressClients.delete(taskId);
+    }
 }
 
 function closeProgress(taskId, keepMs = 15000) {
@@ -125,8 +141,12 @@ app.get('/api/progress/:taskId', (req, res) => {
     progressClients.set(taskId, clients);
 
     const cached = lastProgress.get(taskId);
-    if (cached) res.write(`data: ${JSON.stringify(cached)}\n\n`);
-    else res.write(`data: ${JSON.stringify({ state: 'waiting', phase: '等待任务', message: '等待测速任务启动...' })}\n\n`);
+    try {
+        if (cached) res.write(`data: ${JSON.stringify(cached)}\n\n`);
+        else res.write(`data: ${JSON.stringify({ state: 'waiting', phase: '等待任务', message: '等待测速任务启动...' })}\n\n`);
+    } catch (e) {
+        console.warn('[SSE] initial write failed:', e && e.message ? e.message : e);
+    }
 
     req.on('close', () => {
         const current = progressClients.get(taskId);
@@ -841,7 +861,12 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
     });
 });
 
-process.on('uncaughtException', (err) => console.error('\n🔥 致命错误:', err.message, '\n'));
+process.on('uncaughtException', (err) => {
+    console.error('\n🔥 uncaughtException:', err && err.stack ? err.stack : err, '\n');
+});
+process.on('unhandledRejection', (reason) => {
+    console.error('\n🔥 unhandledRejection:', reason && reason.stack ? reason.stack : reason, '\n');
+});
 (async () => {
     try {
         await initDb();
