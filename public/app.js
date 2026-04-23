@@ -145,7 +145,9 @@ function switchTab(view) {
         tabFav?.classList.add('active');
         tableCard?.classList.remove('hidden');
         bottomBar?.classList.remove('hide-down');
-        if(startBtn) startBtn.innerText = '测速选中';
+        if(pageDesc) pageDesc.innerText = '持久化保存在服务器上的专属优选节点库'; // 👈 新增功能介绍
+        
+        if(startBtn) startBtn.innerText = isFavoriteTesting ? '测速中...' : '测速选中';
         saveSelectedBtn?.classList.add('hidden');
         tagSelectedBtn?.classList.remove('hidden');
         deleteSelectedBtn?.classList.remove('hidden');
@@ -154,16 +156,22 @@ function switchTab(view) {
         tabSettings?.classList.add('active');
         settingsViewContainer?.classList.remove('hidden');
         bottomBar?.classList.add('hide-down');
+        if(pageDesc) pageDesc.innerText = '测速引擎核心参数与面板外观偏好设置'; // 👈 新增功能介绍
+        
     } else if (view === 'dns') {
         tabDns?.classList.add('active');
         dnsViewContainer?.classList.remove('hidden');
         bottomBar?.classList.add('hide-down');
+        if(pageDesc) pageDesc.innerText = 'Cloudflare 域名解析管理与优选 IP 一键同步'; // 👈 新增功能介绍
+        
         loadDnsRecords();
     } else {
         tabTest?.classList.add('active');
         testViewContainer?.classList.remove('hidden');
         tableCard?.classList.remove('hidden');
         bottomBar?.classList.remove('hide-down');
+        if(pageDesc) pageDesc.innerText = '输入 CNAME 域名或 IP 触发多节点智能解析与测速'; // 👈 新增功能介绍
+        
         if(startBtn) { startBtn.disabled = false; startBtn.innerText = '开始测速'; }
         saveSelectedBtn?.classList.remove('hidden');
         if(saveSelectedBtn) saveSelectedBtn.innerText = '💾 收藏';
@@ -213,18 +221,7 @@ saveCfSettingsBtn?.addEventListener('click', async () => {
     } catch (e) { showToast('❌ 保存失败'); }
 });
 
-async function loadDnsRecords() {
-    if(!dnsRecordList) return;
-    dnsRecordList.innerHTML = '<div class="history-item"><div class="spinner"></div>正在获取...</div>';
-    try {
-        const res = await fetch('/api/cf/dns');
-        const json = await res.json();
-        if (!json.success) return dnsRecordList.innerHTML = `<div class="history-item" style="color:#ef4444;">${json.msg || '获取失败'}</div>`;
-        const records = json.data || [];
-        if (records.length === 0) return dnsRecordList.innerHTML = '<div class="history-item text-center">当前域名下无 A 记录</div>';
-        dnsRecordList.innerHTML = records.map(r => `<div class="history-item"><span class="font-mono text-slate-800">${r.content}</span><span class="text-slate-500">${r.proxied ? '☁️ 代理' : '🌐 直连'}</span></div>`).join('');
-    } catch (e) { dnsRecordList.innerHTML = '<div class="history-item">网络错误</div>'; }
-}
+
 refreshDnsBtn?.addEventListener('click', loadDnsRecords);
 
 async function syncToCloudflare(ips, clearOnly = false) {
@@ -450,6 +447,94 @@ saveSelectedBtn?.addEventListener('click', async () => {
         });
         if ((await res.json()).success) showToast(`🌟 收藏成功`);
     } catch (e) {}
+});
+
+// --- 1. 补充 DOM 绑定 ---
+const manualDnsIp = document.getElementById('manual-dns-ip');
+const addDnsBtn = document.getElementById('add-dns-btn');
+
+// --- 2. 修改 loadDnsRecords 函数以支持单条删除按钮 ---
+async function loadDnsRecords() {
+    if(!dnsRecordList) return;
+    dnsRecordList.innerHTML = '<div class="history-item"><div class="spinner"></div>正在获取...</div>';
+    try {
+        const res = await fetch('/api/cf/dns');
+        const json = await res.json();
+        if (!json.success) return dnsRecordList.innerHTML = `<div class="history-item" style="color:#ef4444;">${json.msg || '获取失败'}</div>`;
+        const records = json.data || [];
+        if (records.length === 0) return dnsRecordList.innerHTML = '<div class="history-item text-center">当前域名下无 A 记录</div>';
+
+        // 1. 提取出所有 CF 上的 IP
+        const ips = records.map(r => r.content);
+        let regionMap = {};
+
+        // 2. 调用后端接口，批量查询这些 IP 的物理地区
+        try {
+            const regRes = await fetch('/api/regions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ips })
+            });
+            const regJson = await regRes.json();
+            if (regJson.success) regionMap = regJson.data || {};
+        } catch(e) {
+            console.warn("获取地区失败", e);
+        }
+
+        // 3. 将地区信息合并进去，重新渲染列表
+        dnsRecordList.innerHTML = records.map(r => {
+            const region = regionMap[r.content] || '❓ 未知';
+            return `
+            <div class="history-item" style="align-items: center;">
+                <div style="display: flex; flex-direction: column; gap: 0.3rem;">
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <span class="font-mono text-slate-800" style="font-size: 1rem;">${r.content}</span>
+                        <span class="region-badge" style="font-size: 0.65rem; padding: 0.15rem 0.45rem; line-height: 1;">${region}</span>
+                    </div>
+                    <span style="font-size: 0.7rem; color: #94a3b8;">${r.proxied ? '☁️ 代理模式 (CDN)' : '🌐 直连模式 (仅 DNS)'}</span>
+                </div>
+                <button class="single-dns-del-btn" data-id="${r.id}" style="background: none; border: none; color: #94a3b8; cursor: pointer; padding: 4px; font-size: 1.1rem; transition: color 0.2s;">🗑️</button>
+            </div>
+            `;
+        }).join('');
+
+        // 绑定单条删除事件（加了 hover 变红效果，更精致）
+        document.querySelectorAll('.single-dns-del-btn').forEach(btn => {
+            btn.addEventListener('mouseover', () => btn.style.color = '#ef4444');
+            btn.addEventListener('mouseout', () => btn.style.color = '#94a3b8');
+            btn.addEventListener('click', async () => {
+                if(!confirm('确定删除此条解析吗？')) return;
+                const recordId = btn.dataset.id;
+                try {
+                    const delRes = await fetch(`/api/cf/dns/${recordId}`, { method: 'DELETE' });
+                    if((await delRes.json()).success) { showToast('✅ 已删除'); loadDnsRecords(); }
+                } catch(e) { showToast('❌ 删除失败'); }
+            });
+        });
+    } catch (e) { dnsRecordList.innerHTML = '<div class="history-item">网络错误</div>'; }
+}
+
+// --- 3. 补充“手动添加”逻辑 ---
+addDnsBtn?.addEventListener('click', async () => {
+    const ip = manualDnsIp.value.trim();
+    if(!ip) return showToast('❌ 请输入有效的 IP');
+    
+    addDnsBtn.disabled = true;
+    try {
+        const res = await fetch('/api/cf/dns/add', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip })
+        });
+        const json = await res.json();
+        if(json.success) {
+            showToast('✅ 添加成功');
+            manualDnsIp.value = '';
+            loadDnsRecords(); // 刷新列表
+        } else {
+            showToast(`❌ 失败: ${json.msg}`);
+        }
+    } finally { addDnsBtn.disabled = false; }
 });
 
 deleteSelectedBtn?.addEventListener('click', async () => {

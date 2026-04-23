@@ -332,7 +332,31 @@ app.post('/api/cf/dns/sync', async (req, res) => {
         res.json({ success: true, added });
     } catch (e) { res.status(500).json({ success: false, msg: '同步解析失败' }); }
 });
+// --- [新增] 添加单条 DNS 记录 ---
+app.post('/api/cf/dns/add', async (req, res) => {
+    try {
+        const { ip } = req.body;
+        const raw = await getSetting('cf_api');
+        const { zoneId, domain } = raw ? JSON.parse(raw) : {};
+        if (!zoneId || !domain) return res.json({ success: false, msg: '请先完成 CF 设置' });
 
+        const result = await requestCF(`/zones/${zoneId}/dns_records`, 'POST', {
+            type: 'A', name: domain, content: ip, proxied: false, ttl: 60
+        });
+        res.json({ success: result.success, msg: result.errors?.[0]?.message });
+    } catch (e) { res.status(500).json({ success: false, msg: e.message }); }
+});
+
+// --- [新增] 删除单条 DNS 记录 ---
+app.delete('/api/cf/dns/:id', async (req, res) => {
+    try {
+        const recordId = req.params.id;
+        const raw = await getSetting('cf_api');
+        const { zoneId } = raw ? JSON.parse(raw) : {};
+        const result = await requestCF(`/zones/${zoneId}/dns_records/${recordId}`, 'DELETE');
+        res.json({ success: result.success });
+    } catch (e) { res.status(500).json({ success: false, msg: e.message }); }
+});
 function getOfficialRecommendedCfstConfig() {
     return {
         n: 200, t: 4, tp: 443, url: 'https://speed.cloudflare.com/__down?bytes=20000000',
@@ -461,30 +485,129 @@ app.post('/api/regions', async (req, res) => {
 });
 
 const cfColoMap = {
-    'HKG': '🇭🇰 香港', 'TPE': '🇹🇼 台北', 'NRT': '🇯🇵 东京', 'KIX': '🇯🇵 大阪',
-    'SGP': '🇸🇬 新加坡', 'ICN': '🇰🇷 首尔', 'LAX': '🇺🇸 洛杉矶', 'SJC': '🇺🇸 圣何塞',
-    'SEA': '🇺🇸 西雅图', 'FRA': '🇩🇪 法兰克福', 'LHR': '🇬🇧 伦敦', 'SYD': '🇦🇺 悉尼',
-    'CDG': '🇫🇷 巴黎', 'AMS': '🇳🇱 阿姆斯特丹', 'YYZ': '🇨🇦 多伦多', 'KUL': '🇲🇾 吉隆坡',
-    'BKK': '🇹🇭 曼谷', 'MNL': '🇵🇭 马尼拉', 'CGK': '🇮🇩 雅加达', 'BOM': '🇮🇳 孟买'
+    // 北美洲
+    'LAX': '🇺🇸 洛杉矶', 'SJC': '🇺🇸 圣何塞', 'SFO': '🇺🇸 旧金山', 'SEA': '🇺🇸 西雅图',
+    'DFW': '🇺🇸 达拉斯', 'ORD': '🇺🇸 芝加哥', 'IAD': '🇺🇸 华盛顿', 'EWR': '🇺🇸 纽瓦克',
+    'MIA': '🇺🇸 迈阿密', 'ATL': '🇺🇸 亚特兰大', 'JFK': '🇺🇸 纽约', 'PHX': '🇺🇸 凤凰城',
+    'DEN': '🇺🇸 丹佛', 'LAS': '🇺🇸 拉斯维加斯', 'HNL': '🇺🇸 檀香山', 'SLC': '🇺🇸 盐湖城',
+    'BOS': '🇺🇸 波士顿', 'DTW': '🇺🇸 底特律', 'PDX': '🇺🇸 波特兰', 'MSP': '🇺🇸 明尼阿波利斯',
+    'MCI': '🇺🇸 堪萨斯城', 'MCO': '🇺🇸 奥兰多', 'CLT': '🇺🇸 夏洛特', 'TPA': '🇺🇸 坦帕',
+    'AUS': '🇺🇸 奥斯汀', 'SAN': '🇺🇸 圣地亚哥', 'IAH': '🇺🇸 休斯顿',
+    'YYZ': '🇨🇦 多伦多', 'YUL': '🇨🇦 蒙特利尔', 'YVR': '🇨🇦 温哥华', 'YYC': '🇨🇦 卡尔加里',
+
+    // 亚洲
+    'HKG': '🇭🇰 香港', 
+    'TPE': '🇹🇼 台北', 'KHH': '🇹🇼 高雄',
+    'NRT': '🇯🇵 东京', 'HND': '🇯🇵 东京', 'KIX': '🇯🇵 大阪', 'FUK': '🇯🇵 福冈', 'OKA': '🇯🇵 冲绳',
+    'SGP': '🇸🇬 新加坡', 'SIN': '🇸🇬 新加坡',
+    'ICN': '🇰🇷 首尔', 'PUS': '🇰🇷 釜山', 'GMP': '🇰🇷 首尔',
+    'KUL': '🇲🇾 吉隆坡', 'JHB': '🇲🇾 柔佛',
+    'BKK': '🇹🇭 曼谷',
+    'MNL': '🇵🇭 马尼拉',
+    'CGK': '🇮🇩 雅加达',
+    'SGN': '🇻🇳 胡志明市', 'HAN': '🇻🇳 河内',
+    'BOM': '🇮🇳 孟买', 'DEL': '🇮🇳 新德里', 'MAA': '🇮🇳 金奈', 'CCU': '🇮🇳 加尔各答', 'BLR': '🇮🇳 班加罗尔', 'HYD': '🇮🇳 海得拉巴',
+    'KHI': '🇵🇰 卡拉奇', 'LHE': '🇵🇰 拉合尔', 'ISB': '🇵🇰 伊斯兰堡',
+    'DAC': '🇧🇩 达卡',
+    'CMB': '🇱🇰 科伦坡',
+    'KTM': '🇳🇵 加德满都',
+    'PNH': '🇰🇭 金边',
+    'PEK': '🇨🇳 北京', 'SHA': '🇨🇳 上海', 'PVG': '🇨🇳 上海', 'CAN': '🇨🇳 广州', 'CTU': '🇨🇳 成都',
+
+    // 欧洲
+    'FRA': '🇩🇪 法兰克福', 'MUC': '🇩🇪 慕尼黑', 'BER': '🇩🇪 柏林', 'DUS': '🇩🇪 杜塞尔多夫', 'HAM': '🇩🇪 汉堡',
+    'LHR': '🇬🇧 伦敦', 'MAN': '🇬🇧 曼彻斯特', 'EDI': '🇬🇧 爱丁堡',
+    'CDG': '🇫🇷 巴黎', 'MRS': '🇫🇷 马赛',
+    'AMS': '🇳🇱 阿姆斯特丹',
+    'MAD': '🇪🇸 马德里', 'BCN': '🇪🇸 巴塞罗那',
+    'MIL': '🇮🇹 米兰', 'MXP': '🇮🇹 米兰', 'FCO': '🇮🇹 罗马',
+    'VIE': '🇦🇹 维也纳',
+    'ZRH': '🇨🇭 苏黎世', 'GVA': '🇨🇭 日内瓦',
+    'PRG': '🇨🇿 布拉格',
+    'WAW': '🇵🇱 华沙',
+    'BRU': '🇧🇪 布鲁塞尔',
+    'CPH': '🇩🇰 哥本哈根',
+    'DUB': '🇮🇪 都柏林',
+    'ARN': '🇸🇪 斯德哥尔摩',
+    'OSL': '🇳🇴 奥斯陆',
+    'HEL': '🇫🇮 赫尔辛基',
+    'LIS': '🇵🇹 里斯本',
+    'OTP': '🇷🇴 布加勒斯特',
+    'SOF': '🇧🇬 索非亚',
+    'ATH': '🇬🇷 雅典',
+
+    // 大洋洲
+    'SYD': '🇦🇺 悉尼', 'MEL': '🇦🇺 墨尔本', 'BNE': '🇦🇺 布里斯班', 'PER': '🇦🇺 珀斯', 'ADL': '🇦🇺 阿德莱德',
+    'AKL': '🇳🇿 奥克兰',
+
+    // 南美洲 & 墨西哥
+    'MEX': '🇲🇽 墨西哥城', 'QRO': '🇲🇽 克雷塔罗',
+    'GRU': '🇧🇷 圣保罗', 'GIG': '🇧🇷 里约热内卢', 'CWB': '🇧🇷 库里蒂巴',
+    'EZE': '🇦🇷 布宜诺斯艾利斯',
+    'SCL': '🇨🇱 圣地亚哥',
+    'BOG': '🇨🇴 波哥大',
+    'LIM': '🇵🇪 利马',
+    
+    // 中东 & 非洲
+    'DXB': '🇦🇪 迪拜', 
+    'DOH': '🇶🇦 多哈', 
+    'TLV': '🇮🇱 特拉维夫', 
+    'AMM': '🇯🇴 安曼',
+    'IST': '🇹🇷 伊斯坦布尔',
+    'JNB': '🇿🇦 约翰内斯堡', 'CPT': '🇿🇦 开普敦', 
+    'LOS': '🇳🇬 拉各斯',
+    'NBO': '🇰🇪 内罗毕',
+    'CAI': '🇪🇬 开罗'
 };
 
 function getColo(ip) {
     return new Promise((resolve) => {
-        const probes = [ { mod: http, url: `http://${ip}/cdn-cgi/trace`, timeout: 1800 }, { mod: https, url: `https://${ip}/cdn-cgi/trace`, timeout: 2200 } ];
+        // 伪装合法的 Host 和 SNI，防止被 CF 拦截直接 IP 访问
+        const headers = { 
+            'Host': 'speed.cloudflare.com', 
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' 
+        };
+        const probes = [
+            { 
+                mod: http, 
+                url: `http://${ip}/cdn-cgi/trace`, 
+                opts: { timeout: 3000, headers } 
+            },
+            { 
+                mod: https, 
+                url: `https://${ip}/cdn-cgi/trace`, 
+                opts: { 
+                    timeout: 3500, 
+                    headers, 
+                    rejectUnauthorized: false, 
+                    servername: 'speed.cloudflare.com' // 核心：解决 HTTPS 握手拦截
+                } 
+            }
+        ];
         let idx = 0;
+
         const runProbe = () => {
             if (idx >= probes.length) return resolve('❓ 测速节点');
             const current = probes[idx++];
-            const req = current.mod.get(current.url, { timeout: current.timeout, rejectUnauthorized: false }, (res) => {
-                let data = ''; res.on('data', (c) => data += c);
+            const req = current.mod.get(current.url, current.opts, (res) => {
+                let data = '';
+                res.on('data', (chunk) => { data += chunk; });
                 res.on('end', () => {
                     const match = data.match(/colo=([A-Z]+)/);
-                    if (match && match[1]) resolve(cfColoMap[match[1]] || `🌐 ${match[1]}`); else runProbe();
+                    if (match && match[1]) {
+                        resolve(cfColoMap[match[1]] || `🌐 ${match[1]}`);
+                    } else {
+                        runProbe(); // 如果没抓到 colo，尝试下一个协议
+                    }
                 });
             });
             req.on('error', () => runProbe());
-            req.on('timeout', () => { try { req.destroy(); } catch {} runProbe(); });
+            req.on('timeout', () => {
+                try { req.destroy(); } catch {}
+                runProbe();
+            });
         };
+
         runProbe();
     });
 }

@@ -162,19 +162,27 @@
             </div>
         </div>
 
-        <div id="dns-view-container" class="hidden">
+     <div id="dns-view-container" class="hidden">
             <div class="glass-card settings-area">
                 <div class="setting-row">
-                    <label style="font-size: 1.1rem;">当前域名解析记录</label>
-                    <div class="setting-hint" id="dns-domain-label">请先在设置中配置 CF 信息</div>
+                    <label style="font-size: 1.1rem;">DNS 解析管理</label>
+                    <div class="setting-hint" id="dns-domain-label">请在设置中配置 CF 信息</div>
                 </div>
+                
+                <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
+                    <input id="manual-dns-ip" type="text" placeholder="手动输入 IP 地址..." style="flex: 1; border-radius: 0.5rem; border: 1px solid #cbd5e1; padding: 0.5rem;">
+                    <button id="add-dns-btn" class="tool-btn primary" style="white-space: nowrap;">➕ 添加记录</button>
+                </div>
+
                 <div class="setting-actions">
-                    <button id="refresh-dns-btn" class="tool-btn primary">🔄 刷新记录</button>
-                    <!-- <button id="clear-dns-btn" class="tool-btn" style="color: #ef4444;">🧹 清空全部解析</button> -->
+                    <button id="refresh-dns-btn" class="tool-btn primary">🔄 刷新列表</button>
                 </div>
+
                 <div class="history-panel" style="margin-top: 1rem;">
-                    <div class="history-header">A 记录列表</div>
-                    <div id="dns-record-list"><div class="history-item text-center">暂无数据</div></div>
+                    <div class="history-header">当前 A 记录 (仅展示匹配域名的记录)</div>
+                    <div id="dns-record-list">
+                        <div class="history-item text-center">暂无数据</div>
+                    </div>
                 </div>
             </div>
         </div>
