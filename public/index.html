@@ -124,13 +124,13 @@
         <div id="test-view-container">
             <div class="glass-card input-area">
                 <div class="input-header">
-                    <span>目标节点输入 (IP / 域名)</span>
+                    <span>目标节点输入 (IPv4 / IPv6 / 域名)</span>
                     <div class="input-toggle-wrap">
                         <label class="input-toggle"><input id="allow-cname-input" type="checkbox"> CNAME 解析</label>
                         <span class="ip-stats">已识别: <span id="ip-count">0</span></span>
                     </div>
                 </div>
-                <textarea id="ip-input" placeholder="支持直接粘贴内容或导入 CSV。&#10;1.0.0.1&#10;cdn.cloudflare.net"></textarea>
+                <textarea id="ip-input" placeholder="支持直接粘贴内容或导入 CSV。&#10;1.0.0.1&#10;2606:4700::1111&#10;cdn.cloudflare.net"></textarea>
                 <div class="input-actions">
                     <button id="clear-input-btn" class="tool-btn">🗑️ 清空</button>
                     <input type="file" id="file-input" accept=".csv,.txt" style="display: none;">
@@ -139,7 +139,22 @@
                 <div class="source-fetch">
                     <select id="source-url-preset">
                         <option value="custom">拉取源预设（自定义）</option>
-                        <option value="uouin_cf">麒麟 CF 优选（uouin）</option>
+                        <optgroup label="热门优选库 (高可用)">
+                            <option value="https://api.uouin.com/cloudflare.html">麒麟 CF 优选（uouin）</option>
+                            <option value="https://raw.githubusercontent.com/ymyuuu/IPDB/main/bestcf.txt">Ymyuuu 优选 (bestcf)</option>
+                            <option value="https://raw.githubusercontent.com/addresses1/ifconfig/main/addressesapi.txt">Addresses1 综合接口</option>
+                        </optgroup>
+                        <optgroup label="社区聚合库">
+                            <option value="https://raw.githubusercontent.com/AlectoQAQ/cloudflare-ips/main/ips_v4.txt">AlectoQAQ IPv4</option>
+                            <option value="https://raw.githubusercontent.com/AlectoQAQ/cloudflare-ips/main/ips_v6.txt">AlectoQAQ IPv6</option>
+                            <option value="https://raw.githubusercontent.com/yaozxc/CloudflareSpeedTest-api/master/ip.txt">yaozxc 优选库</option>
+                        </optgroup>
+                        <optgroup label="CF 官方全量库">
+                            <option value="https://www.cloudflare.com/ips-v4">Cloudflare 官方 IPv4 段</option>
+                            <option value="https://www.cloudflare.com/ips-v6">Cloudflare 官方 IPv6 段</option>
+                            <option value="https://raw.githubusercontent.com/XIU2/CloudflareSpeedTest/master/ip.txt">XIU2 官方库 IPv4</option>
+                            <option value="https://raw.githubusercontent.com/XIU2/CloudflareSpeedTest/master/ipv6.txt">XIU2 官方库 IPv6</option>
+                        </optgroup>
                     </select>
                     <input id="source-url-input" type="text" placeholder="预设拉取源 URL">
                     <button id="fetch-source-btn" class="tool-btn">🌐 拉取源</button>
@@ -162,7 +177,7 @@
             </div>
         </div>
 
-     <div id="dns-view-container" class="hidden">
+        <div id="dns-view-container" class="hidden">
             <div class="glass-card settings-area">
                 <div class="setting-row">
                     <label style="font-size: 1.1rem;">DNS 解析管理</label>
@@ -176,13 +191,11 @@
 
                 <div class="setting-actions">
                     <button id="refresh-dns-btn" class="tool-btn primary">🔄 刷新列表</button>
+                    <button id="clear-dns-btn" class="tool-btn" style="color: #ef4444;">🧹 清空全部解析</button>
                 </div>
-
                 <div class="history-panel" style="margin-top: 1rem;">
-                    <div class="history-header">当前 A 记录 (仅展示匹配域名的记录)</div>
-                    <div id="dns-record-list">
-                        <div class="history-item text-center">暂无数据</div>
-                    </div>
+                    <div class="history-header">当前 A/AAAA 记录 (仅展示匹配域名的记录)</div>
+                    <div id="dns-record-list"><div class="history-item text-center">暂无数据</div></div>
                 </div>
             </div>
         </div>
@@ -196,7 +209,7 @@
                 <div class="setting-row"><label>Zone ID (区域 ID)</label><input id="cf-zone-id" type="text" placeholder="你的域名的 Zone ID"></div>
                 <div class="setting-row"><label>需解析的子域名</label><input id="cf-domain" type="text" placeholder="例如: cdn.example.com"></div>
                 <div class="setting-row"><label>API Token / Global API Key</label><input id="cf-token" type="password" placeholder="输入 Token 或 Key"></div>
-                <!-- <div class="setting-row"><label>CF 账号邮箱</label><input id="cf-email" type="text" placeholder="仅 Global Key 模式必填，Token模式留空"></div> -->
+                <div class="setting-row"><label>CF 账号邮箱</label><input id="cf-email" type="text" placeholder="仅 Global Key 模式必填，Token模式留空"></div>
                 <div class="setting-actions" style="margin-top: 0.5rem;">
                     <button id="save-cf-settings-btn" class="tool-btn primary" style="background: #fef3c7; color: #d97706; border-color: #fde68a;">💾 保存 CF 配置</button>
                 </div>
@@ -207,13 +220,12 @@
                 <div class="setting-row"><label>延迟测速模式</label><select id="cfst-mode"><option value="tcp">TCPing（默认）</option><option value="http">HTTPing</option></select></div>
                 <div class="setting-row"><label><input id="incremental-mode" type="checkbox" checked> 增量测速模式</label></div>
                 <div class="setting-row"><label><input id="incremental-down-only" type="checkbox"> 仅重测速度下降节点</label></div>
-                <div class="setting-row"><label>测速模板</label><select id="speed-profile-preset"><option value="balance">均衡（推荐）</option><option value="fast">快速预览</option><option value="precise">精确测速</option></select></div>
                 <div class="setting-row"><label>解析超时（秒）</label><input id="parse-timeout" type="number" value="25"></div>
                 <div class="setting-row"><label>任务总超时（秒）</label><input id="total-timeout" type="number" value="150"></div>
                 
                 <div id="cfst-httping-box" class="setting-row mode-collapsible is-collapsed"><label>HTTPing 有效状态码</label><input id="cfst-httping-code" type="number"></div>
                 <div id="cfst-cfcolo-box" class="setting-row mode-collapsible is-collapsed"><label>限制地区（IATA 码）</label><input id="cfst-cfcolo" type="text"></div>
-              <div class="setting-row">
+                <div class="setting-row">
                     <label for="cfst-tp">测速端口</label>
                     <input id="cfst-tp" type="number" min="1" max="65535" step="1" placeholder="默认: 443">
                     <div class="setting-hint">对应 <code>-tp</code>：延迟测速端口。一般设为 443，也可选 80, 8443, 2053 等。（默认值: 443）</div>
@@ -231,16 +243,7 @@
                 <div class="setting-row">
                     <label for="cfst-url">下载测速 URL</label>
                     <input id="cfst-url" type="text" placeholder="默认: https://speed.cloudflare.com/__down?bytes=20000000">
-                    <select id="cfst-url-preset">
-                        <option value="custom">自定义（手动输入）</option>
-                        <option value="cf_5m">官方极速（Cloudflare 5MB）</option>
-                        <option value="cf_20m">官方平衡（Cloudflare 20MB）</option>
-                        <option value="cf_50m">官方精确（Cloudflare 50MB）</option>
-                        <option value="cf_100m">官方高压（Cloudflare 100MB）</option>
-                        <option value="ovh_100m">备用 OVH（100MB）</option>
-                        <option value="ovh_1g">备用 OVH（1GB）</option>
-                    </select>
-                    <div class="setting-hint">对应 <code>-url</code>：用于测试下载速度的文件地址。推荐优先使用官方预设；也可自建测速文件源。</div>
+                    <div class="setting-hint">对应 <code>-url</code>：用于测试下载速度的文件地址。也可自建测速文件源。</div>
                 </div>
                 <div class="setting-row">
                     <label for="cfst-dt">下载测速时长（秒）</label>
@@ -255,7 +258,7 @@
                 <div class="setting-row">
                     <label for="cfst-dn-single">下载测速数量（单 IP）</label>
                     <input id="cfst-dn-single" type="number" min="1" max="10" step="1" placeholder="默认: 1">
-                    <div class="setting-hint">面板专属：仅在输入栏只有 1 个目标 IP 时生效，对应单目标场景的 <code>-dn</code>，避免单节点重复测速浪费时间。（默认值: 1）</div>
+                    <div class="setting-hint">仅在输入栏只有 1 个目标 IP 时生效，对应单目标场景的 <code>-dn</code>，避免单节点重复测速浪费时间。（默认值: 1）</div>
                 </div>
                 <div class="setting-row">
                     <label for="cfst-tl">平均延迟上限（ms）</label>
@@ -282,7 +285,7 @@
                     <div class="setting-hint">对应 <code>-dd</code>：开启后跳过下载阶段，<code>-dn/-dt/-sl</code> 均不再生效。结果仅按延迟/丢包排序，大幅缩短测速耗时。</div>
                 </div>
                 <div class="setting-row">
-                    <label><input id="cfst-allip" type="checkbox"> 测速全部 IP（仅 IPv4）</label>
+                    <label><input id="cfst-allip" type="checkbox"> 测速全部 IP</label>
                     <div class="setting-hint">对应 <code>-allip</code>：对提供的所有 IP 进行测速。开启后耗时会更长，但结果覆盖面更广。</div>
                 </div>
                 <div class="setting-row">
@@ -294,10 +297,20 @@
                     <input id="cfst-topn" type="number" min="1" max="200" step="1" placeholder="默认: 50">
                     <div class="setting-hint">对应 <code>-p</code>：测速完成后，前端表格最多保留和显示的结果条数。（默认值: 50）</div>
                 </div>
-                
                 <div class="setting-actions">
                     <button id="save-settings-btn" class="tool-btn primary">💾 保存设置</button>
                     <button id="reset-settings-btn" class="tool-btn">↩︎ 恢复官方推荐</button>
+                </div>
+            </div>
+            
+            <div class="glass-card settings-area" style="margin-top: 1.5rem; margin-bottom: 0;">
+                <div class="setting-row">
+                    <label style="font-size: 1rem; color: #10b981;">系统维护 (本地控制台专属)</label>
+                    <div class="setting-hint">用于自动获取并更新底层的二进制引擎和官方 IP 段文本。</div>
+                </div>
+                <div class="setting-actions" style="margin-top: 0.5rem;">
+                    <button id="update-engine-btn" class="tool-btn" style="background: #ecfdf5; color: #059669; border-color: #a7f3d0;">🔄 升级 CFST 测速引擎</button>
+                    <button id="update-ips-btn" class="tool-btn" style="background: #f0fdfa; color: #0d9488; border-color: #99f6e4;">📥 更新官方 IP 库 (txt)</button>
                 </div>
             </div>
         </div>
@@ -317,8 +330,7 @@
                 <table>
                     <thead>
                         <tr>
-                            <th class="text-center" style="width: 40px;">
-                                <input type="checkbox" id="select-all"></th>
+                            <th class="text-center" style="width: 40px;"><input type="checkbox" id="select-all"></th>
                             <th>地区 / 节点</th><th>物理 IP (点击复制)</th><th class="text-center">延迟</th><th class="text-right" style="color: #4f46e5;">下载 (MB/s)</th><th class="text-center">标签</th><th class="text-center">较上次</th>
                         </tr>
                     </thead>

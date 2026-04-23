@@ -1,5 +1,5 @@
 const express = require('express');
-const { spawn } = require('child_process');
+const { spawn, exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
@@ -8,6 +8,7 @@ const http = require('http');
 const https = require('https');
 const dns = require('dns').promises;
 const crypto = require('crypto');
+const os = require('os');
 
 const app = express();
 const DEFAULT_PORT = Number(process.env.PORT) || 3088;
@@ -78,7 +79,6 @@ function sendProgress(taskId, payload) {
             res.write(message);
         } catch (e) {
             deadClients.push(res);
-            console.warn('[SSE] write failed:', e && e.message ? e.message : e);
         }
     });
     if (deadClients.length > 0) {
@@ -134,14 +134,17 @@ function parseProgressLine(line) {
     return payload;
 }
 
-function isPrivateIPv4(hostname) {
-    const m = String(hostname || '').match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-    if (!m) return false;
-    const [a, b] = [Number(m[1]), Number(m[2])];
-    if (a === 10 || a === 127 || a === 0) return true;
-    if (a === 169 && b === 254) return true;
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 192 && b === 168) return true;
+function isPrivateIP(hostname) {
+    const ipv4Match = String(hostname || '').match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (ipv4Match) {
+        const [a, b] = [Number(ipv4Match[1]), Number(ipv4Match[2])];
+        if (a === 10 || a === 127 || a === 0) return true;
+        if (a === 169 && b === 254) return true;
+        if (a === 172 && b >= 16 && b <= 31) return true;
+        if (a === 192 && b === 168) return true;
+    }
+    // 简单判断 IPv6 内部地址
+    if (hostname.startsWith('fe80:') || hostname === '::1' || hostname === '::') return true;
     return false;
 }
 
@@ -201,11 +204,11 @@ app.post('/api/fetch-source', async (req, res) => {
 
     let parsed;
     try { parsed = new URL(rawUrl); } catch { return res.status(400).json({ success: false, msg: 'URL 格式不合法' }); }
-    if (!['http:', 'https:'].includes(parsed.protocol)) return res.status(400).json({ success: false, msg: '仅支持 http/https' });
+    if (!['http:', 'https:'].includes(parsed.protocol)) return res.status(400).json({ success: false, msg: '仅支持 http/https 地址' });
     
     const host = String(parsed.hostname || '').toLowerCase();
-    if (!host || host === 'localhost' || host.endsWith('.local') || isPrivateIPv4(host)) {
-        return res.status(400).json({ success: false, msg: '不允许拉取内网地址' });
+    if (!host || host === 'localhost' || host.endsWith('.local') || isPrivateIP(host)) {
+        return res.status(400).json({ success: false, msg: '不允许拉取本地/内网地址' });
     }
 
     try {
@@ -219,13 +222,62 @@ app.post('/api/fetch-source', async (req, res) => {
         const capped = String(text || '').slice(0, 2 * 1024 * 1024);
         return res.json({ success: true, data: capped });
     } catch (e) {
-        return res.status(500).json({ success: false, msg: '拉取源地址失败' });
+        return res.status(500).json({ success: false, msg: '拉取源地址失败，请稍后重试' });
     }
 });
 
-// --- JSON 数据库与 CF API ---
+// --- 系统维护接口 ---
+app.post('/api/system/update-engine', (req, res) => {
+    const platform = os.platform();
+    const arch = os.arch();
+    let file = '';
+    
+    // 💡 回归真理：官方从 v2.3.0 开始就是改名为了 cfst_xxx，且 Mac 换成了 .zip！
+    if (platform === 'darwin' && arch === 'arm64') file = 'cfst_darwin_arm64.zip';
+    else if (platform === 'darwin' && arch === 'x64') file = 'cfst_darwin_amd64.zip';
+    else if (platform === 'linux' && (arch === 'arm64' || arch === 'aarch64')) file = 'cfst_linux_arm64.tar.gz';
+    else if (platform === 'linux' && (arch === 'x64' || arch === 'amd64')) file = 'cfst_linux_amd64.tar.gz';
+    
+    if (!file) return res.json({ success: false, msg: `暂不支持自动更新该架构: ${platform}-${arch}` });
+    
+    // 多路备用节点，优先尝试最稳的几个代理，最后兜底 GitHub 直连
+    const url1 = `https://mirror.ghproxy.com/https://github.com/XIU2/CloudflareSpeedTest/releases/latest/download/${file}`;
+    const url2 = `https://gh-proxy.com/https://github.com/XIU2/CloudflareSpeedTest/releases/latest/download/${file}`;
+    const url3 = `https://github.com/XIU2/CloudflareSpeedTest/releases/latest/download/${file}`;
+    
+    // 核心改进：加上 --connect-timeout 8，只要一个源卡住超过 8 秒立刻切换下一个
+    const curlOpts = '--connect-timeout 8 -sSfL';
+    
+    let cmd = '';
+    if (file.endsWith('.zip')) {
+        cmd = `rm -f cfst && (curl ${curlOpts} -o tmp_cfst.zip "${url1}" || curl ${curlOpts} -o tmp_cfst.zip "${url2}" || curl ${curlOpts} -o tmp_cfst.zip "${url3}") && unzip -o tmp_cfst.zip cfst && rm -f tmp_cfst.zip && chmod +x cfst`;
+    } else {
+        cmd = `rm -f cfst && (curl ${curlOpts} -o tmp_cfst.tar.gz "${url1}" || curl ${curlOpts} -o tmp_cfst.tar.gz "${url2}" || curl ${curlOpts} -o tmp_cfst.tar.gz "${url3}") && tar -zxf tmp_cfst.tar.gz cfst && rm -f tmp_cfst.tar.gz && chmod +x cfst`;
+    }
+    
+    exec(cmd, { cwd: __dirname }, (error, stdout, stderr) => {
+        if (error) {
+            const realError = (stderr || error.message || '未知').replace(/\n/g, ' ').slice(-150).trim();
+            return res.json({ success: false, msg: `失败原因: ${realError}` });
+        }
+        res.json({ success: true });
+    });
+});
+
+app.post('/api/system/update-ips', async (req, res) => {
+    try {
+        const v4 = await fetch('https://www.cloudflare.com/ips-v4').then(r => r.text());
+        const v6 = await fetch('https://www.cloudflare.com/ips-v6').then(r => r.text());
+        if (v4 && v4.includes('.')) fs.writeFileSync(path.join(__dirname, 'ip.txt'), v4.trim());
+        if (v6 && v6.includes(':')) fs.writeFileSync(path.join(__dirname, 'ipv6.txt'), v6.trim());
+        res.json({ success: true });
+    } catch (e) {
+        res.json({ success: false, msg: '请求失败: ' + e.message });
+    }
+});
+
+// --- 💾 数据库配置：JSON 持久化存储 ---
 const DB_FILE = path.join(__dirname, 'database.json');
-const LEGACY_JSON_FILE = path.join(__dirname, 'saved_ips.json');
 let dbData = { saved_ips: [], settings: {}, test_history: {}, last_targets: [] };
 let dbSaveQueue = Promise.resolve();
 
@@ -244,12 +296,13 @@ async function initDb() {
             dbData = JSON.parse(raw);
             if (!dbData.saved_ips) dbData.saved_ips = [];
             if (!dbData.settings) dbData.settings = {};
-            if (!dbData.test_history) dbData.test_history = {};
+            if (!dbData.test_history || typeof dbData.test_history !== 'object') dbData.test_history = {};
             if (!Array.isArray(dbData.last_targets)) dbData.last_targets = [];
+            dbData.saved_ips = dbData.saved_ips.map((item) => ({ ...item, tag: typeof item.tag === 'string' ? item.tag : '' }));
         } else {
             await fs.promises.writeFile(DB_FILE, JSON.stringify(dbData, null, 2));
         }
-    } catch (e) { console.error('DB init failed:', e); }
+    } catch (e) {}
 }
 
 async function saveDb() {
@@ -257,13 +310,14 @@ async function saveDb() {
         const tmpFile = `${DB_FILE}.tmp`;
         await fs.promises.writeFile(tmpFile, JSON.stringify(dbData, null, 2));
         await fs.promises.rename(tmpFile, DB_FILE);
-    }).catch(e => console.error('DB save failed:', e));
+    }).catch(() => {});
     await dbSaveQueue;
 }
 
 async function getSetting(key) { return dbData.settings[key] || null; }
 async function setSetting(key, value) { dbData.settings[key] = value; await saveDb(); }
 
+// --- CF API 与 DNS 设置 ---
 async function requestCF(path, method, body) {
     const raw = await getSetting('cf_api');
     if (!raw) throw new Error('未配置 CF 信息');
@@ -289,10 +343,8 @@ app.get('/api/settings/cf', async (req, res) => {
 });
 
 app.post('/api/settings/cf', async (req, res) => {
-    try {
-        await setSetting('cf_api', JSON.stringify(req.body));
-        res.json({ success: true });
-    } catch (e) { res.json({ success: false }); }
+    try { await setSetting('cf_api', JSON.stringify(req.body)); res.json({ success: true }); } 
+    catch (e) { res.json({ success: false }); }
 });
 
 app.get('/api/cf/dns', async (req, res) => {
@@ -306,33 +358,6 @@ app.get('/api/cf/dns', async (req, res) => {
     } catch (e) { res.status(500).json({ success: false, msg: 'CF API 请求失败' }); }
 });
 
-app.post('/api/cf/dns/sync', async (req, res) => {
-    try {
-        const { ips, clearOnly } = req.body;
-        const raw = await getSetting('cf_api');
-        const { zoneId, domain } = raw ? JSON.parse(raw) : {};
-        if (!zoneId || !domain) return res.json({ success: false, msg: '未配置 CF 信息' });
-
-        const curr = await requestCF(`/zones/${zoneId}/dns_records?type=A&name=${domain}`, 'GET');
-        if (curr.success && curr.result) {
-            for (const record of curr.result) {
-                await requestCF(`/zones/${zoneId}/dns_records/${record.id}`, 'DELETE');
-            }
-        }
-        
-        if (clearOnly) return res.json({ success: true, msg: '已清空解析' });
-
-        let added = 0;
-        for (const ip of ips) {
-            const addRes = await requestCF(`/zones/${zoneId}/dns_records`, 'POST', {
-                type: 'A', name: domain, content: ip, proxied: false, ttl: 60
-            });
-            if (addRes.success) added++;
-        }
-        res.json({ success: true, added });
-    } catch (e) { res.status(500).json({ success: false, msg: '同步解析失败' }); }
-});
-// --- [新增] 添加单条 DNS 记录 ---
 app.post('/api/cf/dns/add', async (req, res) => {
     try {
         const { ip } = req.body;
@@ -347,7 +372,6 @@ app.post('/api/cf/dns/add', async (req, res) => {
     } catch (e) { res.status(500).json({ success: false, msg: e.message }); }
 });
 
-// --- [新增] 删除单条 DNS 记录 ---
 app.delete('/api/cf/dns/:id', async (req, res) => {
     try {
         const recordId = req.params.id;
@@ -357,6 +381,33 @@ app.delete('/api/cf/dns/:id', async (req, res) => {
         res.json({ success: result.success });
     } catch (e) { res.status(500).json({ success: false, msg: e.message }); }
 });
+
+app.post('/api/cf/dns/sync', async (req, res) => {
+    try {
+        const { ips, clearOnly } = req.body;
+        const raw = await getSetting('cf_api');
+        const { zoneId, domain } = raw ? JSON.parse(raw) : {};
+        if (!zoneId || !domain) return res.json({ success: false, msg: '未配置 CF 信息' });
+
+        const curr = await requestCF(`/zones/${zoneId}/dns_records?type=A&name=${domain}`, 'GET');
+        if (curr.success && curr.result) {
+            for (const record of curr.result) await requestCF(`/zones/${zoneId}/dns_records/${record.id}`, 'DELETE');
+        }
+        
+        if (clearOnly) return res.json({ success: true, msg: '已清空解析' });
+
+        let added = 0;
+        for (const ip of ips) {
+            const addRes = await requestCF(`/zones/${zoneId}/dns_records`, 'POST', {
+                type: 'A', name: domain, content: ip, proxied: false, ttl: 60
+            });
+            if (addRes.success) added++;
+        }
+        res.json({ success: true, added });
+    } catch (e) { res.status(500).json({ success: false, msg: '同步解析失败' }); }
+});
+
+// --- 设置获取 ---
 function getOfficialRecommendedCfstConfig() {
     return {
         n: 200, t: 4, tp: 443, url: 'https://speed.cloudflare.com/__down?bytes=20000000',
@@ -373,6 +424,8 @@ async function getCfstConfig() {
     try {
         const parsed = JSON.parse(raw);
         const mode = parsed.mode === 'http' ? 'http' : 'tcp';
+        const cfcoloNormalized = typeof parsed.cfcolo === 'string' ? parsed.cfcolo.trim() : '';
+        const tlr = Number(parsed.tlr);
         return {
             n: Number.isFinite(Number(parsed.n)) ? Math.max(1, Math.min(1000, Number(parsed.n))) : defaults.n,
             t: Number.isFinite(Number(parsed.t)) ? Math.max(1, Math.min(20, Number(parsed.t))) : defaults.t,
@@ -380,13 +433,13 @@ async function getCfstConfig() {
             url: typeof parsed.url === 'string' && parsed.url.trim() ? parsed.url.trim() : defaults.url,
             mode,
             httpingCode: Number.isFinite(Number(parsed.httpingCode)) ? Math.max(100, Math.min(599, Number(parsed.httpingCode))) : defaults.httpingCode,
-            cfcolo: typeof parsed.cfcolo === 'string' ? parsed.cfcolo.trim() : '',
+            cfcolo: cfcoloNormalized,
             dt: Number.isFinite(Number(parsed.dt)) ? Math.max(1, Math.min(30, Number(parsed.dt))) : defaults.dt,
             dn: Number.isFinite(Number(parsed.dn)) ? Math.max(1, Math.min(50, Number(parsed.dn))) : defaults.dn,
             dnSingle: Number.isFinite(Number(parsed.dnSingle)) ? Math.max(1, Math.min(10, Number(parsed.dnSingle))) : defaults.dnSingle,
             tl: Number.isFinite(Number(parsed.tl)) ? Math.max(0, Math.min(9999, Number(parsed.tl))) : defaults.tl,
             tll: Number.isFinite(Number(parsed.tll)) ? Math.max(0, Math.min(9999, Number(parsed.tll))) : defaults.tll,
-            tlr: Number.isFinite(Number(parsed.tlr)) ? Math.max(0, Math.min(1, Number(parsed.tlr))) : defaults.tlr,
+            tlr: Number.isFinite(tlr) ? Math.max(0, Math.min(1, tlr)) : defaults.tlr,
             sl: Number.isFinite(Number(parsed.sl)) ? Math.max(0, Math.min(9999, Number(parsed.sl))) : defaults.sl,
             disableDownload: Boolean(parsed.disableDownload),
             allip: Boolean(parsed.allip),
@@ -396,46 +449,16 @@ async function getCfstConfig() {
     } catch { return defaults; }
 }
 
-async function migrateLegacySavedIpsIfNeeded() {
-    if (!fs.existsSync(LEGACY_JSON_FILE) || dbData.saved_ips.length > 0) return;
-    try {
-        const raw = fs.readFileSync(LEGACY_JSON_FILE, 'utf-8');
-        const items = JSON.parse(raw);
-        if (Array.isArray(items)) {
-            for (const item of items) {
-                if (item?.ip && !dbData.saved_ips.find(s => s.ip === item.ip)) {
-                    dbData.saved_ips.push({ ...item, created_at: Date.now(), tag: item.tag || '' });
-                }
-            }
-            await saveDb();
-        }
-    } catch {}
-}
-
-function computeDelta(ip, ping, speed) {
-    const hist = dbData.test_history[ip] || [];
-    if (hist.length === 0) return { deltaSpeed: null, deltaPing: null };
-    const last = hist[hist.length - 1];
-    return {
-        deltaSpeed: last.speed === null || speed === null ? null : Number((speed - last.speed).toFixed(2)),
-        deltaPing: last.ping === null || ping === null ? null : Number((ping - last.ping).toFixed(1))
-    };
-}
-
+// --- 数据相关逻辑 ---
 app.get('/api/saved-ips', async (req, res) => {
     try {
         const rows = [...dbData.saved_ips].map(item => {
-            // 智能兜底：如果收藏时没有保存速度，去历史记录里找最新的一次
             const hist = dbData.test_history[item.ip] || [];
             const latest = hist.length > 0 ? hist[hist.length - 1] : {};
-            
             const ping = item.ping !== undefined ? item.ping : (latest.ping || 0);
             const speed = item.speed !== undefined ? item.speed : (latest.speed || 0);
-
             return {
-                ...item,
-                ping,
-                speed,
+                ...item, ping, speed,
                 ...computeDelta(item.ip, ping, speed)
             };
         }).sort((a, b) => b.created_at - a.created_at);
@@ -448,7 +471,7 @@ app.post('/api/save-ips', async (req, res) => {
     let added = 0, updated = 0;
     try {
         for (const item of newIps) {
-            if (!item?.ip) continue;
+            if (!item || !item.ip) continue;
             const ip = String(item.ip).trim();
             const existingIdx = dbData.saved_ips.findIndex(s => s.ip === ip);
             if (existingIdx === -1) {
@@ -494,7 +517,6 @@ const cfColoMap = {
     'MCI': '🇺🇸 堪萨斯城', 'MCO': '🇺🇸 奥兰多', 'CLT': '🇺🇸 夏洛特', 'TPA': '🇺🇸 坦帕',
     'AUS': '🇺🇸 奥斯汀', 'SAN': '🇺🇸 圣地亚哥', 'IAH': '🇺🇸 休斯顿',
     'YYZ': '🇨🇦 多伦多', 'YUL': '🇨🇦 蒙特利尔', 'YVR': '🇨🇦 温哥华', 'YYC': '🇨🇦 卡尔加里',
-
     // 亚洲
     'HKG': '🇭🇰 香港', 
     'TPE': '🇹🇼 台北', 'KHH': '🇹🇼 高雄',
@@ -513,7 +535,6 @@ const cfColoMap = {
     'KTM': '🇳🇵 加德满都',
     'PNH': '🇰🇭 金边',
     'PEK': '🇨🇳 北京', 'SHA': '🇨🇳 上海', 'PVG': '🇨🇳 上海', 'CAN': '🇨🇳 广州', 'CTU': '🇨🇳 成都',
-
     // 欧洲
     'FRA': '🇩🇪 法兰克福', 'MUC': '🇩🇪 慕尼黑', 'BER': '🇩🇪 柏林', 'DUS': '🇩🇪 杜塞尔多夫', 'HAM': '🇩🇪 汉堡',
     'LHR': '🇬🇧 伦敦', 'MAN': '🇬🇧 曼彻斯特', 'EDI': '🇬🇧 爱丁堡',
@@ -535,11 +556,9 @@ const cfColoMap = {
     'OTP': '🇷🇴 布加勒斯特',
     'SOF': '🇧🇬 索非亚',
     'ATH': '🇬🇷 雅典',
-
     // 大洋洲
     'SYD': '🇦🇺 悉尼', 'MEL': '🇦🇺 墨尔本', 'BNE': '🇦🇺 布里斯班', 'PER': '🇦🇺 珀斯', 'ADL': '🇦🇺 阿德莱德',
     'AKL': '🇳🇿 奥克兰',
-
     // 南美洲 & 墨西哥
     'MEX': '🇲🇽 墨西哥城', 'QRO': '🇲🇽 克雷塔罗',
     'GRU': '🇧🇷 圣保罗', 'GIG': '🇧🇷 里约热内卢', 'CWB': '🇧🇷 库里蒂巴',
@@ -547,67 +566,35 @@ const cfColoMap = {
     'SCL': '🇨🇱 圣地亚哥',
     'BOG': '🇨🇴 波哥大',
     'LIM': '🇵🇪 利马',
-    
     // 中东 & 非洲
-    'DXB': '🇦🇪 迪拜', 
-    'DOH': '🇶🇦 多哈', 
-    'TLV': '🇮🇱 特拉维夫', 
-    'AMM': '🇯🇴 安曼',
-    'IST': '🇹🇷 伊斯坦布尔',
-    'JNB': '🇿🇦 约翰内斯堡', 'CPT': '🇿🇦 开普敦', 
-    'LOS': '🇳🇬 拉各斯',
-    'NBO': '🇰🇪 内罗毕',
-    'CAI': '🇪🇬 开罗'
+    'DXB': '🇦🇪 迪拜', 'DOH': '🇶🇦 多哈', 'TLV': '🇮🇱 特拉维夫', 'AMM': '🇯🇴 安曼',
+    'IST': '🇹🇷 伊斯坦布尔', 'JNB': '🇿🇦 约翰内斯堡', 'CPT': '🇿🇦 开普敦', 
+    'LOS': '🇳🇬 拉各斯', 'NBO': '🇰🇪 内罗毕', 'CAI': '🇪🇬 开罗'
 };
 
 function getColo(ip) {
     return new Promise((resolve) => {
-        // 伪装合法的 Host 和 SNI，防止被 CF 拦截直接 IP 访问
-        const headers = { 
-            'Host': 'speed.cloudflare.com', 
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' 
-        };
+        const isV6 = ip.includes(':');
+        const urlIp = isV6 ? `[${ip}]` : ip; 
+        const headers = { 'Host': 'speed.cloudflare.com', 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' };
         const probes = [
-            { 
-                mod: http, 
-                url: `http://${ip}/cdn-cgi/trace`, 
-                opts: { timeout: 3000, headers } 
-            },
-            { 
-                mod: https, 
-                url: `https://${ip}/cdn-cgi/trace`, 
-                opts: { 
-                    timeout: 3500, 
-                    headers, 
-                    rejectUnauthorized: false, 
-                    servername: 'speed.cloudflare.com' // 核心：解决 HTTPS 握手拦截
-                } 
-            }
+            { mod: http, url: `http://${urlIp}/cdn-cgi/trace`, opts: { timeout: 3000, headers } },
+            { mod: https, url: `https://${urlIp}/cdn-cgi/trace`, opts: { timeout: 3500, headers, rejectUnauthorized: false, servername: 'speed.cloudflare.com' } }
         ];
         let idx = 0;
-
         const runProbe = () => {
             if (idx >= probes.length) return resolve('❓ 测速节点');
             const current = probes[idx++];
             const req = current.mod.get(current.url, current.opts, (res) => {
-                let data = '';
-                res.on('data', (chunk) => { data += chunk; });
+                let data = ''; res.on('data', (c) => data += c);
                 res.on('end', () => {
                     const match = data.match(/colo=([A-Z]+)/);
-                    if (match && match[1]) {
-                        resolve(cfColoMap[match[1]] || `🌐 ${match[1]}`);
-                    } else {
-                        runProbe(); // 如果没抓到 colo，尝试下一个协议
-                    }
+                    if (match && match[1]) resolve(cfColoMap[match[1]] || `🌐 ${match[1]}`); else runProbe();
                 });
             });
             req.on('error', () => runProbe());
-            req.on('timeout', () => {
-                try { req.destroy(); } catch {}
-                runProbe();
-            });
+            req.on('timeout', () => { try { req.destroy(); } catch {} runProbe(); });
         };
-
         runProbe();
     });
 }
@@ -633,6 +620,16 @@ async function mapWithConcurrency(items, limit, mapper) {
 
 function clamp(num, min, max) { return Math.max(min, Math.min(max, num)); }
 function withTimeout(prom, ms, msg) { let t; return Promise.race([prom, new Promise((_, r) => t = setTimeout(() => r(new Error(msg)), ms))]).finally(() => clearTimeout(t)); }
+
+function computeDelta(ip, ping, speed) {
+    const hist = dbData.test_history[ip] || [];
+    if (hist.length === 0) return { deltaSpeed: null, deltaPing: null };
+    const last = hist[hist.length - 1];
+    return {
+        deltaSpeed: last.speed === null || speed === null ? null : Number((speed - last.speed).toFixed(2)),
+        deltaPing: last.ping === null || ping === null ? null : Number((ping - last.ping).toFixed(1))
+    };
+}
 
 async function saveHistory(items) {
     const now = Date.now();
@@ -661,15 +658,44 @@ function getAdaptiveConfig(base, opts, count) {
 const cfGlobalDnsServers = [ ['8.8.8.8', '8.8.4.4'], ['1.1.1.1', '1.0.0.1'], ['208.67.222.222', '208.67.220.220'] ];
 async function resolveTargets(targets) {
     const finalIps = new Set();
-    const domains = targets.filter(t => !/^(\d{1,3}\.){3}\d{1,3}$/.test(t));
-    targets.filter(t => /^(\d{1,3}\.){3}\d{1,3}$/.test(t)).forEach(ip => finalIps.add(ip));
+    const domains = [];
+    const ipv4Str = '(?:(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.){3}(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)';
+    const ipv6Str = '(?:(?:[0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:|(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}|(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}|(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}|(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:(?:(?::[0-9a-fA-F]{1,4}){1,6})|:(?:(?::[0-9a-fA-F]{1,4}){1,7}|:))';
+    const ipRegexExact = new RegExp(`^(?:${ipv4Str}|${ipv6Str})$`);
+
+    targets.forEach(t => {
+        const trimmed = String(t || '').trim();
+        if (!trimmed) return;
+        if (ipRegexExact.test(trimmed)) finalIps.add(trimmed);
+        else domains.push(trimmed);
+    });
 
     if (domains.length > 0) {
+        const resolveWithTimeout = async (resolver, domain, type, timeoutMs = 2500) => {
+            let timer = null;
+            try {
+                const prom = type === 'AAAA' ? resolver.resolve6(domain) : resolver.resolve4(domain);
+                return await Promise.race([
+                    prom.catch(() => []),
+                    new Promise((resolve) => {
+                        timer = setTimeout(() => { try { resolver.cancel(); } catch {} resolve([]); }, timeoutMs);
+                    })
+                ]);
+            } finally { if (timer) clearTimeout(timer); }
+        };
+
+        const domainList = domains.slice(0, 120);
         const jobs = [];
-        domains.slice(0, 120).forEach(domain => cfGlobalDnsServers.forEach(servers => jobs.push({ domain, servers })));
+        domainList.forEach((domain) => { cfGlobalDnsServers.forEach((servers) => jobs.push({ domain, servers })); });
+        
         await mapWithConcurrency(jobs, 16, async ({ domain, servers }) => {
-            const resolver = new dns.Resolver(); resolver.setServers(servers);
-            try { (await withTimeout(resolver.resolve4(domain), 2500, '')).forEach(ip => finalIps.add(ip)); } catch {}
+            const resolver = new dns.Resolver();
+            resolver.setServers(servers);
+            const [r4, r6] = await Promise.all([
+                resolveWithTimeout(resolver, domain, 'A', 2500),
+                resolveWithTimeout(resolver, domain, 'AAAA', 2500)
+            ]);
+            [...r4, ...r6].forEach(ip => finalIps.add(ip));
         });
     }
     return Array.from(finalIps);
@@ -677,17 +703,52 @@ async function resolveTargets(targets) {
 
 app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
     req.setTimeout(300000);
-    const taskId = req.body?.taskId || crypto.randomUUID();
-    const inputMode = req.body?.inputMode || 'ip';
-    const opts = req.body?.runtimeOptions || {};
+    const taskId = (req.body && req.body.taskId) || crypto.randomUUID();
+    
+    const ipv4Str = '(?:(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.){3}(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)';
+    const ipv6Str = '(?:(?:[0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:|(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}|(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}|(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}|(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:(?:(?::[0-9a-fA-F]{1,4}){1,6})|:(?:(?::[0-9a-fA-F]{1,4}){1,7}|:))';
+    const mixedRegex = new RegExp(`(?:${ipv4Str})|(?:${ipv6Str})|(?:[a-zA-Z0-9][-a-zA-Z0-9]{0,62}\\.)+[a-zA-Z]{2,}`, 'g');
+    const ipRegexExact = new RegExp(`^(?:${ipv4Str}|${ipv6Str})$`);
+
+    const runtimeOptions = req.body?.runtimeOptions || {};
+    const inputMode = String(req.body?.inputMode || 'ip').toLowerCase();
+    const parseTimeoutMs = clamp(Number(runtimeOptions.parseTimeoutSec) || 25, 5, 120) * 1000;
+    const totalTimeoutMs = clamp(Number(runtimeOptions.totalTimeoutSec) || 150, 20, 600) * 1000;
+    const incremental = Boolean(runtimeOptions.incremental);
+    const incrementalDownOnly = Boolean(runtimeOptions.incrementalDownOnly);
     sendProgress(taskId, { state: 'start', phase: '准备中', message: '测速任务初始化中...' });
 
-    let rawTargets = req.file ? [...new Set(req.file.buffer.toString().match(/(?:\d{1,3}\.){3}\d{1,3}|(?:[a-zA-Z0-9-]+\.)+[a-zA-Z]{2,}/g) || [])] : (req.body.targetIps || []);
-    if (typeof rawTargets === 'string') { try { rawTargets = JSON.parse(rawTargets); } catch {} }
-    rawTargets = rawTargets.map(s => String(s).trim()).filter(Boolean);
+    let rawTargets = [];
+    if (req.file) {
+        const content = req.file.buffer.toString('utf-8');
+        rawTargets = [...new Set(content.match(mixedRegex) || [])];
+    } else if (req.body.targetIps) {
+        if (Array.isArray(req.body.targetIps)) rawTargets = req.body.targetIps;
+        else if (typeof req.body.targetIps === 'string') {
+            try { rawTargets = JSON.parse(req.body.targetIps); } catch {}
+        }
+    }
+    rawTargets = rawTargets.map(s => String(s || '').trim()).filter(Boolean);
+
+    if (inputMode === 'ip') {
+        const invalid = rawTargets.filter((item) => !ipRegexExact.test(item));
+        if (invalid.length > 0) {
+            sendProgress(taskId, { state: 'error', phase: '输入校验', message: `检测到 ${invalid.length} 个非 IP 内容` });
+            closeProgress(taskId);
+            return res.status(400).json({ success: false, msg: `当前为 IP 模式，请关闭 CNAME 或移除域名后重试` });
+        }
+    } else {
+        const domainRegexExact = /^(?:[a-zA-Z0-9](?:[-a-zA-Z0-9]{0,62})\.)+[a-zA-Z]{2,}$/;
+        const invalid = rawTargets.filter((item) => !ipRegexExact.test(item) && !domainRegexExact.test(item));
+        if (invalid.length > 0) {
+            sendProgress(taskId, { state: 'error', phase: '输入校验', message: `检测到 ${invalid.length} 个非法值` });
+            closeProgress(taskId);
+            return res.status(400).json({ success: false, msg: `当前为 CNAME 模式，检测到 ${invalid.length} 个非法值` });
+        }
+    }
 
     const baseConfig = await getCfstConfig();
-    const cfstConfig = getAdaptiveConfig(baseConfig, opts, rawTargets.length);
+    const cfstConfig = getAdaptiveConfig(baseConfig, runtimeOptions, rawTargets.length);
     const args = ['-n', String(cfstConfig.n), '-t', String(cfstConfig.t), '-tp', String(cfstConfig.tp), '-tl', String(cfstConfig.tl), '-tll', String(cfstConfig.tll), '-tlr', String(cfstConfig.tlr), '-sl', String(cfstConfig.sl)];
     if (cfstConfig.mode === 'http') { args.push('-httping', '-httping-code', String(cfstConfig.httpingCode)); if (cfstConfig.cfcolo) args.push('-cfcolo', cfstConfig.cfcolo); }
     if (cfstConfig.disableDownload) args.push('-dd');
@@ -699,12 +760,13 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
         sendProgress(taskId, { state: 'running', phase: '解析目标', message: `解析 ${rawTargets.length} 个目标...` });
         let resolvedIps = await resolveTargets(rawTargets);
         if (!resolvedIps.length) {
-            sendProgress(taskId, { state: 'error', phase: '解析失败', message: '未解析出有效 IPv4' });
-            closeProgress(taskId); return res.json({ success: false, msg: '未解析出有效 IPv4' });
+            sendProgress(taskId, { state: 'error', phase: '解析失败', message: '未解析出有效 IP' });
+            closeProgress(taskId); return res.json({ success: false, msg: '未解析出有效 IP' });
         }
         let finalIps = [...new Set(resolvedIps)];
-        if (opts.incrementalDownOnly) finalIps = finalIps.filter(ip => dbData.test_history[ip]?.length >= 2 && dbData.test_history[ip][dbData.test_history[ip].length-1].speed < dbData.test_history[ip][dbData.test_history[ip].length-2].speed - 3) || finalIps;
+        if (incrementalDownOnly) finalIps = finalIps.filter(ip => dbData.test_history[ip]?.length >= 2 && dbData.test_history[ip][dbData.test_history[ip].length-1].speed < dbData.test_history[ip][dbData.test_history[ip].length-2].speed - 3) || finalIps;
         inputIps = new Set(finalIps);
+        // cfst 如果是 IPv6 会在命令行自动识别，但由于逗号分割可能解析异常，这里通过参数传递
         args.push('-ip', finalIps.join(','), '-url', cfstConfig.url, '-dt', String(cfstConfig.dt), '-dn', String(finalIps.length <= 1 ? cfstConfig.dnSingle : cfstConfig.dn));
     } else {
         args.push('-url', cfstConfig.url, '-dt', String(cfstConfig.dt), '-dn', String(cfstConfig.dn));
@@ -762,14 +824,9 @@ process.on('unhandledRejection', err => console.error('🔥 unhandledRejection:'
     try {
         ensureLocalRuntimeReady();
         await initDb();
-        await migrateLegacySavedIpsIfNeeded();
-        const server = app.listen(DEFAULT_PORT, () => {
-            console.log(`\n🎉 测速中心已启动: http://localhost:${server.address().port}\n`);
-        });
+        const server = app.listen(DEFAULT_PORT, () => { console.log(`\n🎉 测速中心已启动: http://localhost:${server.address().port}\n`); });
         server.on('error', (e) => {
-            if (e.code === 'EADDRINUSE') {
-                app.listen(DEFAULT_PORT + 1, () => console.log(`\n🎉 测速中心已启动: http://localhost:${DEFAULT_PORT + 1}\n`));
-            }
+            if (e.code === 'EADDRINUSE') app.listen(DEFAULT_PORT + 1, () => console.log(`\n🎉 测速中心已启动: http://localhost:${DEFAULT_PORT + 1}\n`));
         });
     } catch (e) {
         console.error('启动失败:', e.message); process.exit(1);

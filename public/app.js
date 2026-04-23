@@ -49,6 +49,8 @@ const refreshDnsBtn = document.getElementById('refresh-dns-btn');
 const clearDnsBtn = document.getElementById('clear-dns-btn');
 const dnsRecordList = document.getElementById('dns-record-list');
 const dnsDomainLabel = document.getElementById('dns-domain-label');
+const manualDnsIp = document.getElementById('manual-dns-ip');
+const addDnsBtn = document.getElementById('add-dns-btn');
 
 const cfstMode = document.getElementById('cfst-mode');
 const cfstHttpingBox = document.getElementById('cfst-httping-box');
@@ -59,7 +61,6 @@ const cfstTpInput = document.getElementById('cfst-tp');
 const cfstNInput = document.getElementById('cfst-n');
 const cfstTInput = document.getElementById('cfst-t');
 const cfstUrlInput = document.getElementById('cfst-url');
-const cfstUrlPreset = document.getElementById('cfst-url-preset');
 const cfstDtInput = document.getElementById('cfst-dt');
 const cfstDnInput = document.getElementById('cfst-dn');
 const cfstDnSingleInput = document.getElementById('cfst-dn-single');
@@ -73,7 +74,6 @@ const cfstDebug = document.getElementById('cfst-debug');
 const cfstTopNInput = document.getElementById('cfst-topn');
 const incrementalMode = document.getElementById('incremental-mode');
 const incrementalDownOnly = document.getElementById('incremental-down-only');
-const speedProfilePreset = document.getElementById('speed-profile-preset');
 const parseTimeoutInput = document.getElementById('parse-timeout');
 const totalTimeoutInput = document.getElementById('total-timeout');
 const saveSettingsBtn = document.getElementById('save-settings-btn');
@@ -87,39 +87,28 @@ let progressPollTimer = null;
 let currentTaskId = '';
 const TABLE_COLSPAN = 7;
 
-// --- 地区码标准化字典 ---
+// --- 双栈 IPv4 + IPv6 支持 ---
+const ipv4Str = '(?:(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.){3}(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)';
+const ipv6Str = '(?:(?:[0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:|(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}|(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}|(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}|(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:(?:(?::[0-9a-fA-F]{1,4}){1,6})|:(?:(?::[0-9a-fA-F]{1,4}){1,7}|:))';
+const ipRegexGlobal = new RegExp(`(?:${ipv4Str})|(?:${ipv6Str})`, 'g');
+const mixedRegex = new RegExp(`(?:${ipv4Str})|(?:${ipv6Str})|(?:[a-zA-Z0-9][-a-zA-Z0-9]{0,62}\\.)+[a-zA-Z]{2,}`, 'g');
+
 const isoMap = {
-    'HKG': 'HK', '香港': 'HK',
-    'TPE': 'TW', '台北': 'TW', '台湾': 'TW',
-    'NRT': 'JP', 'KIX': 'JP', '东京': 'JP', '大阪': 'JP', '日本': 'JP',
-    'SGP': 'SG', '新加坡': 'SG',
-    'ICN': 'KR', '首尔': 'KR', '韩国': 'KR',
-    'LAX': 'US', 'SJC': 'US', 'SEA': 'US', '洛杉矶': 'US', '圣何塞': 'US', '西雅图': 'US', '美国': 'US',
-    'FRA': 'DE', '法兰克福': 'DE', '德国': 'DE',
-    'LHR': 'GB', '伦敦': 'GB', '英国': 'GB',
-    'SYD': 'AU', '悉尼': 'AU', '澳大利亚': 'AU',
-    'CDG': 'FR', '巴黎': 'FR', '法国': 'FR',
-    'AMS': 'NL', '阿姆斯特丹': 'NL', '荷兰': 'NL',
-    'YYZ': 'CA', '多伦多': 'CA', '加拿大': 'CA',
-    'KUL': 'MY', '吉隆坡': 'MY', '马来西亚': 'MY',
-    'BKK': 'TH', '曼谷': 'TH', '泰国': 'TH',
-    'MNL': 'PH', '马尼拉': 'PH', '菲律宾': 'PH',
-    'CGK': 'ID', '雅加达': 'ID', '印尼': 'ID',
-    'BOM': 'IN', '孟买': 'IN', '印度': 'IN'
+    'HKG': 'HK', '香港': 'HK', 'TPE': 'TW', '台北': 'TW', '台湾': 'TW', 'NRT': 'JP', 'KIX': 'JP', '东京': 'JP', '大阪': 'JP', '日本': 'JP',
+    'SGP': 'SG', '新加坡': 'SG', 'ICN': 'KR', '首尔': 'KR', '韩国': 'KR', 'LAX': 'US', 'SJC': 'US', 'SEA': 'US', '洛杉矶': 'US', '圣何塞': 'US', '西雅图': 'US', '美国': 'US',
+    'FRA': 'DE', '法兰克福': 'DE', '德国': 'DE', 'LHR': 'GB', '伦敦': 'GB', '英国': 'GB', 'SYD': 'AU', '悉尼': 'AU', '澳大利亚': 'AU',
+    'CDG': 'FR', '巴黎': 'FR', '法国': 'FR', 'AMS': 'NL', '阿姆斯特丹': 'NL', '荷兰': 'NL', 'YYZ': 'CA', '多伦多': 'CA', '加拿大': 'CA',
+    'KUL': 'MY', '吉隆坡': 'MY', '马来西亚': 'MY', 'BKK': 'TH', '曼谷': 'TH', '泰国': 'TH', 'MNL': 'PH', '马尼拉': 'PH', '菲律宾': 'PH',
+    'CGK': 'ID', '雅加达': 'ID', '印尼': 'ID', 'BOM': 'IN', '孟买': 'IN', '印度': 'IN'
 };
 
 function getIsoCode(regionStr) {
     if (!regionStr || regionStr.includes('未知') || regionStr.includes('⏳')) return 'UN';
     const s = regionStr.toUpperCase();
-    for (const [key, val] of Object.entries(isoMap)) {
-        if (s.includes(key)) return val;
-    }
+    for (const [key, val] of Object.entries(isoMap)) { if (s.includes(key)) return val; }
     const match = s.match(/[A-Z]{3}/);
     return match ? match[0] : 'UN';
 }
-
-const ipRegexGlobal = /(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)/g;
-const mixedRegex = /(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)|(?:[a-zA-Z0-9][-a-zA-Z0-9]{0,62}\.)+[a-zA-Z]{2,}/g;
 
 let toastTimeout;
 function showToast(msg) {
@@ -145,9 +134,9 @@ function switchTab(view) {
         tabFav?.classList.add('active');
         tableCard?.classList.remove('hidden');
         bottomBar?.classList.remove('hide-down');
-        if(pageDesc) pageDesc.innerText = '持久化保存在服务器上的专属优选节点库'; // 👈 新增功能介绍
+        if(pageDesc) pageDesc.innerText = '持久化保存在服务器上的专属优选节点库';
         
-        if(startBtn) startBtn.innerText = isFavoriteTesting ? '测速中...' : '测速选中';
+        if(startBtn) startBtn.innerText = '测速选中';
         saveSelectedBtn?.classList.add('hidden');
         tagSelectedBtn?.classList.remove('hidden');
         deleteSelectedBtn?.classList.remove('hidden');
@@ -156,21 +145,19 @@ function switchTab(view) {
         tabSettings?.classList.add('active');
         settingsViewContainer?.classList.remove('hidden');
         bottomBar?.classList.add('hide-down');
-        if(pageDesc) pageDesc.innerText = '测速引擎核心参数与面板外观偏好设置'; // 👈 新增功能介绍
-        
+        if(pageDesc) pageDesc.innerText = '测速引擎核心参数与面板外观偏好设置';
     } else if (view === 'dns') {
         tabDns?.classList.add('active');
         dnsViewContainer?.classList.remove('hidden');
         bottomBar?.classList.add('hide-down');
-        if(pageDesc) pageDesc.innerText = 'Cloudflare 域名解析管理与优选 IP 一键同步'; // 👈 新增功能介绍
-        
+        if(pageDesc) pageDesc.innerText = 'Cloudflare 域名解析管理与优选 IP 一键同步';
         loadDnsRecords();
     } else {
         tabTest?.classList.add('active');
         testViewContainer?.classList.remove('hidden');
         tableCard?.classList.remove('hidden');
         bottomBar?.classList.remove('hide-down');
-        if(pageDesc) pageDesc.innerText = '输入 CNAME 域名或 IP 触发多节点智能解析与测速'; // 👈 新增功能介绍
+        if(pageDesc) pageDesc.innerText = '输入 CNAME 域名或 IP 触发多节点智能解析与测速';
         
         if(startBtn) { startBtn.disabled = false; startBtn.innerText = '开始测速'; }
         saveSelectedBtn?.classList.remove('hidden');
@@ -208,12 +195,7 @@ async function loadCfApiConfig() {
 }
 
 saveCfSettingsBtn?.addEventListener('click', async () => {
-    const payload = { 
-        zoneId: cfZoneId?.value.trim() || '', 
-        domain: cfDomain?.value.trim() || '', 
-        token: cfToken?.value.trim() || '', 
-        email: cfEmail?.value.trim() || '' 
-    };
+    const payload = { zoneId: cfZoneId?.value.trim() || '', domain: cfDomain?.value.trim() || '', token: cfToken?.value.trim() || '', email: cfEmail?.value.trim() || '' };
     try {
         await fetch('/api/settings/cf', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
         showToast('✅ CF 配置已保存');
@@ -221,8 +203,67 @@ saveCfSettingsBtn?.addEventListener('click', async () => {
     } catch (e) { showToast('❌ 保存失败'); }
 });
 
+async function loadDnsRecords() {
+    if(!dnsRecordList) return;
+    dnsRecordList.innerHTML = '<div class="history-item"><div class="spinner"></div>正在获取...</div>';
+    try {
+        const res = await fetch('/api/cf/dns');
+        const json = await res.json();
+        if (!json.success) return dnsRecordList.innerHTML = `<div class="history-item" style="color:#ef4444;">${json.msg || '获取失败'}</div>`;
+        const records = json.data || [];
+        if (records.length === 0) return dnsRecordList.innerHTML = '<div class="history-item text-center">当前域名下无 A 记录</div>';
 
+        const ips = records.map(r => r.content);
+        let regionMap = {};
+        try {
+            const regRes = await fetch('/api/regions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ips }) });
+            const regJson = await regRes.json();
+            if (regJson.success) regionMap = regJson.data || {};
+        } catch(e) {}
+
+        dnsRecordList.innerHTML = records.map(r => {
+            const region = regionMap[r.content] || '❓ 未知';
+            return `
+            <div class="history-item" style="align-items: center;">
+                <div style="display: flex; flex-direction: column; gap: 0.3rem;">
+                    <div style="display: flex; align-items: center; gap: 0.5rem;">
+                        <span class="font-mono text-slate-800" style="font-size: 1rem;">${r.content}</span>
+                        <span class="region-badge" style="font-size: 0.65rem; padding: 0.15rem 0.45rem; line-height: 1;">${region}</span>
+                    </div>
+                    <span style="font-size: 0.7rem; color: #94a3b8;">${r.proxied ? '☁️ 代理模式 (CDN)' : '🌐 直连模式 (仅 DNS)'}</span>
+                </div>
+                <button class="single-dns-del-btn" data-id="${r.id}" style="background: none; border: none; color: #94a3b8; cursor: pointer; padding: 4px; font-size: 1.1rem; transition: color 0.2s;">🗑️</button>
+            </div>
+            `;
+        }).join('');
+
+        document.querySelectorAll('.single-dns-del-btn').forEach(btn => {
+            btn.addEventListener('mouseover', () => btn.style.color = '#ef4444');
+            btn.addEventListener('mouseout', () => btn.style.color = '#94a3b8');
+            btn.addEventListener('click', async () => {
+                if(!confirm('确定删除此条解析吗？')) return;
+                const recordId = btn.dataset.id;
+                try {
+                    const delRes = await fetch(`/api/cf/dns/${recordId}`, { method: 'DELETE' });
+                    if((await delRes.json()).success) { showToast('✅ 已删除'); loadDnsRecords(); }
+                } catch(e) { showToast('❌ 删除失败'); }
+            });
+        });
+    } catch (e) { dnsRecordList.innerHTML = '<div class="history-item">网络错误</div>'; }
+}
 refreshDnsBtn?.addEventListener('click', loadDnsRecords);
+
+addDnsBtn?.addEventListener('click', async () => {
+    const ip = manualDnsIp.value.trim();
+    if(!ip) return showToast('❌ 请输入有效的 IP');
+    addDnsBtn.disabled = true;
+    try {
+        const res = await fetch('/api/cf/dns/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ip }) });
+        const json = await res.json();
+        if(json.success) { showToast('✅ 添加成功'); manualDnsIp.value = ''; loadDnsRecords(); } 
+        else { showToast(`❌ 失败: ${json.msg}`); }
+    } finally { addDnsBtn.disabled = false; }
+});
 
 async function syncToCloudflare(ips, clearOnly = false) {
     if(!syncCfBtn) return;
@@ -242,7 +283,7 @@ syncCfBtn?.addEventListener('click', () => {
     if(confirm(`确定要将这 ${selectedIps.length} 个 IP 覆盖解析到 CF 吗？`)) syncToCloudflare(selectedIps);
 });
 clearDnsBtn?.addEventListener('click', () => {
-    if(confirm('⚠️ 危险操作：确定清空该子域名的所有 A 记录吗？')) syncToCloudflare([], true);
+    if(confirm('⚠️ 危险操作：确定清空该子域名的所有 A/AAAA 记录吗？')) syncToCloudflare([], true);
 });
 
 function applyTheme(mode) {
@@ -291,6 +332,13 @@ ipInput?.addEventListener('blur', () => extractAndUpdateInput(ipInput.value));
 clearInputBtn?.addEventListener('click', () => { if(ipInput) ipInput.value = ''; parsedTargets = []; if(ipCount) ipCount.innerText = '0'; });
 allowCnameInput?.addEventListener('change', () => extractAndUpdateInput(ipInput?.value));
 
+sourceUrlPreset?.addEventListener('change', () => {
+    const val = sourceUrlPreset.value;
+    if (val !== 'custom') {
+        if(sourceUrlInput) sourceUrlInput.value = val;
+    }
+});
+
 fetchSourceBtn?.addEventListener('click', async () => {
     const url = sourceUrlInput?.value.trim(); if (!url) return showToast('❌ 请输入 URL');
     if(fetchSourceBtn) { fetchSourceBtn.disabled = true; fetchSourceBtn.innerText = '拉取中...'; }
@@ -306,6 +354,31 @@ fileInput?.addEventListener('change', (e) => {
     const reader = new FileReader();
     reader.onload = (evt) => { extractAndUpdateInput(evt.target.result); showToast('✅ 导入成功'); };
     reader.readAsText(e.target.files[0]); if(fileInput) fileInput.value = '';
+});
+
+// 系统维护接口调用
+document.getElementById('update-engine-btn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('update-engine-btn');
+    btn.disabled = true; btn.innerText = '⏳ 下载解压中...';
+    try {
+        const res = await fetch('/api/system/update-engine', { method: 'POST' });
+        const json = await res.json();
+        if (json.success) showToast('✅ 引擎已成功更新到最新版');
+        else showToast('❌ ' + json.msg);
+    } catch (e) { showToast('❌ 网络错误'); }
+    finally { btn.disabled = false; btn.innerText = '🔄 升级 CFST 测速引擎'; }
+});
+
+document.getElementById('update-ips-btn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('update-ips-btn');
+    btn.disabled = true; btn.innerText = '⏳ 获取中...';
+    try {
+        const res = await fetch('/api/system/update-ips', { method: 'POST' });
+        const json = await res.json();
+        if (json.success) showToast('✅ 官方 IPv4/v6 库已更新');
+        else showToast('❌ ' + json.msg);
+    } catch (e) { showToast('❌ 网络错误'); }
+    finally { btn.disabled = false; btn.innerText = '📥 更新官方 IP 库 (txt)'; }
 });
 
 function renderTable(dataArray, emptyMsg) {
@@ -385,35 +458,21 @@ copySelectedBtn?.addEventListener('click', () => {
     copyToClipboard(ips, `✅ 成功复制 ${document.querySelectorAll('.ip-checkbox:checked').length} 项`);
 });
 
-// --- 设置标签逻辑 ---
 tagSelectedBtn?.addEventListener('click', async () => {
     const selectedCbs = Array.from(document.querySelectorAll('.ip-checkbox:checked'));
     if (selectedCbs.length === 0) return showToast('❌ 请先选择节点');
 
     const newTag = prompt(`请输入为这 ${selectedCbs.length} 个节点设置的标签：\n(留空则为清除标签)`);
-    if (newTag === null) return; // 用户点击了取消
+    if (newTag === null) return;
 
-    const ipsToUpdate = selectedCbs.map(cb => ({
-        ip: cb.dataset.ip,
-        tag: newTag.trim()
-    }));
+    const ipsToUpdate = selectedCbs.map(cb => ({ ip: cb.dataset.ip, tag: newTag.trim() }));
 
     try {
-        const res = await fetch('/api/save-ips', { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ ips: ipsToUpdate }) 
-        });
+        const res = await fetch('/api/save-ips', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ips: ipsToUpdate }) });
         const json = await res.json();
-        if (json.success) { 
-            showToast(`🏷️ 标签已更新`); 
-            fetchAndRenderFavorites(); 
-        } else {
-            showToast('❌ 标签设置失败');
-        }
-    } catch (e) { 
-        showToast('❌ 网络错误'); 
-    }
+        if (json.success) { showToast(`🏷️ 标签已更新`); fetchAndRenderFavorites(); } 
+        else { showToast('❌ 标签设置失败'); }
+    } catch (e) { showToast('❌ 网络错误'); }
 });
 
 async function fetchAndRenderFavorites() {
@@ -427,7 +486,6 @@ async function fetchAndRenderFavorites() {
 }
 
 saveSelectedBtn?.addEventListener('click', async () => {
-    // 修复：收藏时一并提取当前表格中的 ping 和 speed
     const ipsToSave = Array.from(document.querySelectorAll('.ip-checkbox:checked')).map(cb => {
         const ip = cb.dataset.ip;
         const rowData = currentTableData.find(d => d.ip === ip) || {};
@@ -438,103 +496,10 @@ saveSelectedBtn?.addEventListener('click', async () => {
             speed: rowData.speed
         };
     });
-
     try {
-        const res = await fetch('/api/save-ips', { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ ips: ipsToSave }) 
-        });
+        const res = await fetch('/api/save-ips', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ips: ipsToSave }) });
         if ((await res.json()).success) showToast(`🌟 收藏成功`);
     } catch (e) {}
-});
-
-// --- 1. 补充 DOM 绑定 ---
-const manualDnsIp = document.getElementById('manual-dns-ip');
-const addDnsBtn = document.getElementById('add-dns-btn');
-
-// --- 2. 修改 loadDnsRecords 函数以支持单条删除按钮 ---
-async function loadDnsRecords() {
-    if(!dnsRecordList) return;
-    dnsRecordList.innerHTML = '<div class="history-item"><div class="spinner"></div>正在获取...</div>';
-    try {
-        const res = await fetch('/api/cf/dns');
-        const json = await res.json();
-        if (!json.success) return dnsRecordList.innerHTML = `<div class="history-item" style="color:#ef4444;">${json.msg || '获取失败'}</div>`;
-        const records = json.data || [];
-        if (records.length === 0) return dnsRecordList.innerHTML = '<div class="history-item text-center">当前域名下无 A 记录</div>';
-
-        // 1. 提取出所有 CF 上的 IP
-        const ips = records.map(r => r.content);
-        let regionMap = {};
-
-        // 2. 调用后端接口，批量查询这些 IP 的物理地区
-        try {
-            const regRes = await fetch('/api/regions', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ips })
-            });
-            const regJson = await regRes.json();
-            if (regJson.success) regionMap = regJson.data || {};
-        } catch(e) {
-            console.warn("获取地区失败", e);
-        }
-
-        // 3. 将地区信息合并进去，重新渲染列表
-        dnsRecordList.innerHTML = records.map(r => {
-            const region = regionMap[r.content] || '❓ 未知';
-            return `
-            <div class="history-item" style="align-items: center;">
-                <div style="display: flex; flex-direction: column; gap: 0.3rem;">
-                    <div style="display: flex; align-items: center; gap: 0.5rem;">
-                        <span class="font-mono text-slate-800" style="font-size: 1rem;">${r.content}</span>
-                        <span class="region-badge" style="font-size: 0.65rem; padding: 0.15rem 0.45rem; line-height: 1;">${region}</span>
-                    </div>
-                    <span style="font-size: 0.7rem; color: #94a3b8;">${r.proxied ? '☁️ 代理模式 (CDN)' : '🌐 直连模式 (仅 DNS)'}</span>
-                </div>
-                <button class="single-dns-del-btn" data-id="${r.id}" style="background: none; border: none; color: #94a3b8; cursor: pointer; padding: 4px; font-size: 1.1rem; transition: color 0.2s;">🗑️</button>
-            </div>
-            `;
-        }).join('');
-
-        // 绑定单条删除事件（加了 hover 变红效果，更精致）
-        document.querySelectorAll('.single-dns-del-btn').forEach(btn => {
-            btn.addEventListener('mouseover', () => btn.style.color = '#ef4444');
-            btn.addEventListener('mouseout', () => btn.style.color = '#94a3b8');
-            btn.addEventListener('click', async () => {
-                if(!confirm('确定删除此条解析吗？')) return;
-                const recordId = btn.dataset.id;
-                try {
-                    const delRes = await fetch(`/api/cf/dns/${recordId}`, { method: 'DELETE' });
-                    if((await delRes.json()).success) { showToast('✅ 已删除'); loadDnsRecords(); }
-                } catch(e) { showToast('❌ 删除失败'); }
-            });
-        });
-    } catch (e) { dnsRecordList.innerHTML = '<div class="history-item">网络错误</div>'; }
-}
-
-// --- 3. 补充“手动添加”逻辑 ---
-addDnsBtn?.addEventListener('click', async () => {
-    const ip = manualDnsIp.value.trim();
-    if(!ip) return showToast('❌ 请输入有效的 IP');
-    
-    addDnsBtn.disabled = true;
-    try {
-        const res = await fetch('/api/cf/dns/add', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ip })
-        });
-        const json = await res.json();
-        if(json.success) {
-            showToast('✅ 添加成功');
-            manualDnsIp.value = '';
-            loadDnsRecords(); // 刷新列表
-        } else {
-            showToast(`❌ 失败: ${json.msg}`);
-        }
-    } finally { addDnsBtn.disabled = false; }
 });
 
 deleteSelectedBtn?.addEventListener('click', async () => {
@@ -628,9 +593,7 @@ resetSettingsBtn?.addEventListener('click', async () => {
     try { const res = await fetch('/api/settings/cfst/reset', { method: 'POST' }); if ((await res.json()).success) { loadCfstConfig(); showToast('✅ 已恢复官方推荐设置'); } } catch (e) {}
 });
 
-if(themeMode) {
-    themeMode.value = localStorage.getItem('theme') || 'system'; applyTheme(themeMode.value);
-}
+if(themeMode) { themeMode.value = localStorage.getItem('theme') || 'system'; applyTheme(themeMode.value); }
 loadCfApiConfig();
 loadCfstConfig();
 renderTable(currentTableData, '准备就绪，点击底部按钮开始测速');
