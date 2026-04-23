@@ -364,7 +364,7 @@ fresh_install() {
 main() {
     detect_platform
     hr
-    title "⚡ CFST Web Panel 安装向导 v3.0"
+    title "⚡ CFST Web Panel 安装向导 v1.0"
     dim "平台: ${OS} | 架构: ${ARCH} | Node >= ${MIN_NODE_VERSION}"
     hr
 

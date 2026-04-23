@@ -3,6 +3,9 @@
 一个轻量、可自托管的 Cloudflare 节点测速面板。  
 后端调用 `cfst` 做延迟/下载测速，前端提供实时进度、收藏管理、标签和设置管理。
 
+当前文档与页面统一版本：`v1.0`  
+项目地址：<https://github.com/Amour795/cfst-web-panel>
+
 ## 功能概览
 
 - 一键测速：执行 `./cfst`，解析 `result.csv` 后按速度返回结果
@@ -23,6 +26,14 @@
 ## 快速开始
 
 ### 方式一：一键脚本（推荐）
+
+```bash
+git clone https://github.com/Amour795/cfst-web-panel.git
+cd cfst-web-panel
+bash install.sh
+```
+
+或在已克隆目录中直接执行：
 
 ```bash
 bash install.sh
