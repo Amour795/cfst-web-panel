@@ -10,7 +10,8 @@ const crypto = require('crypto');
 
 
 const app = express();
-const PORT = 3088; 
+const DEFAULT_PORT = Number(process.env.PORT) || 3088;
+const MAX_PORT_RETRY = 20;
 
 // 📦 核心更新 1：引入 JSON 解析中间件（为了接收前端的收藏数据）
 app.use(express.json());
@@ -846,11 +847,35 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (reason) => {
     console.error('\n🔥 unhandledRejection:', reason && reason.stack ? reason.stack : reason, '\n');
 });
+
+function listenWithAutoPort(appInstance, startPort, maxRetry) {
+    return new Promise((resolve, reject) => {
+        let offset = 0;
+
+        const tryListen = () => {
+            const port = startPort + offset;
+            const server = appInstance.listen(port, () => resolve({ server, port }));
+            server.once('error', (err) => {
+                if (err && err.code === 'EADDRINUSE' && offset < maxRetry) {
+                    console.warn(`⚠️ 端口 ${port} 已占用，尝试切换到 ${port + 1}...`);
+                    offset += 1;
+                    tryListen();
+                    return;
+                }
+                reject(err);
+            });
+        };
+
+        tryListen();
+    });
+}
+
 (async () => {
     try {
         await initDb();
         await migrateLegacySavedIpsIfNeeded();
-        app.listen(PORT, () => console.log(`\n🎉 全栈测速中枢 (带持久化存储) 已启动！👉 访问: http://localhost:${PORT}\n`));
+        const { port } = await listenWithAutoPort(app, DEFAULT_PORT, MAX_PORT_RETRY);
+        console.log(`\n🎉 全栈测速中枢 (带持久化存储) 已启动！👉 访问: http://localhost:${port}\n`);
     } catch (e) {
         console.error('\n🔥 数据库初始化失败:', e && e.message ? e.message : e, '\n');
         process.exit(1);
