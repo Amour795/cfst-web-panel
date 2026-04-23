@@ -56,6 +56,12 @@
         
         /* 精致的底部操作栏 (导入CSV / 清空) */
         .input-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 0.25rem; }
+        .source-fetch { display: flex; gap: 0.5rem; align-items: center; }
+        .source-fetch select,
+        .source-fetch input { flex: 1; min-height: 2.55rem; border: 1px solid #cbd5e1; border-radius: 0.5rem; padding: 0.65rem 0.75rem; font-size: 0.9rem; background: #f8fafc; color: #1e293b; outline: none; }
+        .source-fetch select:focus,
+        .source-fetch input:focus { border-color: #4f46e5; background: #fff; box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1); }
+        .source-fetch .tool-btn { min-height: 2.55rem; padding: 0.65rem 1rem; font-size: 0.9rem; border-radius: 0.5rem; white-space: nowrap; }
         .tool-btn { background: none; border: 1px solid #cbd5e1; padding: 0.4rem 0.8rem; border-radius: 0.5rem; font-size: 0.8rem; color: #475569; font-weight: 600; cursor: pointer; transition: all 0.2s; display: flex; align-items: center; gap: 0.25rem; }
         .tool-btn:hover { background: #f1f5f9; border-color: #94a3b8; }
         .tool-btn.primary { color: #4f46e5; border-color: #c7d2fe; background: #eef2ff; }
@@ -144,6 +150,10 @@
         body.dark .setting-hint { color: #94a3b8; }
         body.dark .tool-btn { border-color: rgba(148, 163, 184, 0.25); color: #cbd5e1; }
         body.dark .tool-btn:hover { background: rgba(148, 163, 184, 0.12); }
+        body.dark .source-fetch select,
+        body.dark .source-fetch input { background: rgba(15, 23, 42, 0.6); border-color: rgba(148, 163, 184, 0.25); color: #e5e7eb; }
+        body.dark .source-fetch select:focus,
+        body.dark .source-fetch input:focus { background: rgba(15, 23, 42, 0.75); }
         body.dark .tool-btn.primary { background: rgba(165, 180, 252, 0.16); border-color: rgba(165, 180, 252, 0.28); color: #c7d2fe; }
         body.dark .tool-btn.primary:hover { background: rgba(165, 180, 252, 0.22); border-color: rgba(165, 180, 252, 0.34); }
         body.dark .status-panel { background: linear-gradient(180deg, rgba(30, 41, 59, 0.75), rgba(15, 23, 42, 0.6)); border-color: rgba(148, 163, 184, 0.18); color: #a5b4fc; }
@@ -176,6 +186,7 @@
             .action-btn { flex: 1; justify-content: center; }
             .status-panel { padding: 0.85rem; }
             .progress-label { min-width: 34px; }
+            .source-fetch { flex-direction: column; align-items: stretch; }
         }
     </style>
 </head>
@@ -216,6 +227,21 @@
                     <button id="clear-input-btn" class="tool-btn">🗑️ 清空</button>
                     <input type="file" id="file-input" accept=".csv,.txt" style="display: none;">
                     <button id="import-csv-btn" class="tool-btn primary">📁 导入 CSV 提取IP</button>
+                </div>
+                <div class="source-fetch">
+                    <select id="source-url-preset">
+                        <option value="custom">拉取源预设（自定义）</option>
+                        <option value="uouin_cf">麒麟 CF 优选（uouin）</option>
+                        <option value="xiu2_iptxt">XIU2 官方 ip.txt</option>
+                        <option value="xiu2_ipv6txt">XIU2 官方 ipv6.txt</option>
+                        <option value="yaozxc_iptxt">CloudflareSpeedTest-api ip.txt</option>
+                        <option value="edison_iptxt">CloudflareSpeedTest 镜像 ip.txt</option>
+                        <option value="cf_ips_v4">Cloudflare 官方 IPv4 段</option>
+                        <option value="cf_ips_v6">Cloudflare 官方 IPv6 段</option>
+                        <option value="cf_ips_api">Cloudflare 官方 IP API</option>
+                    </select>
+                    <input id="source-url-input" type="text" placeholder="预设拉取源 URL（例如：https://api.uouin.com/cloudflare.html）">
+                    <button id="fetch-source-btn" class="tool-btn">🌐 拉取源</button>
                 </div>
             </div>
 

@@ -14,6 +14,9 @@
         const fileInput = document.getElementById('file-input');
         const importCsvBtn = document.getElementById('import-csv-btn');
         const clearInputBtn = document.getElementById('clear-input-btn');
+        const sourceUrlPreset = document.getElementById('source-url-preset');
+        const sourceUrlInput = document.getElementById('source-url-input');
+        const fetchSourceBtn = document.getElementById('fetch-source-btn');
         
         const startBtn = document.getElementById('start-btn');
         const statusPanel = document.getElementById('status-panel');
@@ -119,6 +122,16 @@
             cf_100m: 'https://speed.cloudflare.com/__down?bytes=100000000',
             ovh_100m: 'https://proof.ovh.net/files/100Mb.dat',
             ovh_1g: 'https://proof.ovh.net/files/1Gb.dat'
+        };
+        const SOURCE_URL_PRESET_MAP = {
+            uouin_cf: 'https://api.uouin.com/cloudflare.html',
+            xiu2_iptxt: 'https://raw.githubusercontent.com/XIU2/CloudflareSpeedTest/master/ip.txt',
+            xiu2_ipv6txt: 'https://raw.githubusercontent.com/XIU2/CloudflareSpeedTest/master/ipv6.txt',
+            yaozxc_iptxt: 'https://raw.githubusercontent.com/yaozxc/CloudflareSpeedTest-api/master/ip.txt',
+            edison_iptxt: 'https://raw.githubusercontent.com/EdisonChenKoonHei/CloudflareSpeedTest/master/ip.txt',
+            cf_ips_v4: 'https://www.cloudflare.com/ips-v4',
+            cf_ips_v6: 'https://www.cloudflare.com/ips-v6',
+            cf_ips_api: 'https://api.cloudflare.com/client/v4/ips'
         };
         function syncUrlPresetSelection(url) {
             const normalized = String(url || '').trim();
@@ -248,7 +261,8 @@
                 if (payload.state !== 'done' && payload.state !== 'error' && percent >= 100) {
                     percent = 99;
                 }
-                if (payload.state !== 'done' && payload.state !== 'error') {
+                // 若存在 current/total，优先使用真实比例；否则才做单调保护
+                if (computedPercentFromRatio === null && payload.state !== 'done' && payload.state !== 'error') {
                     percent = Math.max(percent, lastProgressPercent);
                 }
                 lastProgressPercent = percent;
@@ -429,6 +443,43 @@
         allowCnameInput.addEventListener('change', () => {
             extractAndUpdateInput(ipInput.value);
             showToast(allowCnameInput.checked ? '✅ 已切换到 CNAME 模式（支持域名）' : '✅ 已切换到 IP 模式（自动移除非 IP）');
+        });
+        sourceUrlPreset.addEventListener('change', () => {
+            const key = sourceUrlPreset.value;
+            if (key === 'custom') return;
+            const url = SOURCE_URL_PRESET_MAP[key];
+            if (url) sourceUrlInput.value = url;
+        });
+        sourceUrlInput.addEventListener('input', () => {
+            const current = String(sourceUrlInput.value || '').trim();
+            const matched = Object.entries(SOURCE_URL_PRESET_MAP).find(([, value]) => value === current);
+            sourceUrlPreset.value = matched ? matched[0] : 'custom';
+        });
+
+        fetchSourceBtn.addEventListener('click', async () => {
+            const url = String(sourceUrlInput.value || '').trim();
+            if (!url) return showToast('❌ 请先输入拉取源 URL');
+            fetchSourceBtn.disabled = true;
+            const oldText = fetchSourceBtn.innerText;
+            fetchSourceBtn.innerText = '拉取中...';
+            try {
+                const res = await fetch('/api/fetch-source', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
+                const json = await res.json();
+                if (!json.success) return showToast(`❌ 拉取失败: ${json.msg || '未知错误'}`);
+                const text = String(json.data || '');
+                const merged = [ipInput.value, text].filter(Boolean).join('\n');
+                extractAndUpdateInput(merged);
+                showToast(`✅ 拉取成功，当前识别 ${parsedTargets.length} 个${allowCnameInput.checked ? '目标' : 'IP'}`);
+            } catch (e) {
+                showToast('❌ 拉取失败: 网络错误');
+            } finally {
+                fetchSourceBtn.disabled = false;
+                fetchSourceBtn.innerText = oldText;
+            }
         });
 
         // 神级交互：点击导入CSV直接在前端提取并展示到输入框

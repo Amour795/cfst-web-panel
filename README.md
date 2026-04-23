@@ -75,6 +75,7 @@ node server.js
 ### 1. 先准备目标
 
 - 在测速大厅粘贴 IP，或点击 `导入 CSV 提取IP`
+- 支持填写“拉取源 URL”后点击 `拉取源`，自动抓取并提取目标（例如：`https://api.uouin.com/cloudflare.html`）
 - 默认为 IP 模式：会自动清理非 IP 内容
 - 勾选 `CNAME 解析` 后可保留域名并由后端解析
 
@@ -116,6 +117,7 @@ node server.js
 - `GET /api/settings/cfst`：读取设置
 - `POST /api/settings/cfst`：保存设置
 - `POST /api/settings/cfst/reset`：恢复官方推荐
+- `POST /api/fetch-source`：拉取外部文本源并返回原始内容
 
 ## 目录结构
 

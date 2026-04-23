@@ -129,6 +129,17 @@ function parseProgressLine(line) {
     return payload;
 }
 
+function isPrivateIPv4(hostname) {
+    const m = String(hostname || '').match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (!m) return false;
+    const [a, b] = [Number(m[1]), Number(m[2])];
+    if (a === 10 || a === 127 || a === 0) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    return false;
+}
+
 app.get('/api/progress/:taskId', (req, res) => {
     const taskId = req.params.taskId;
     res.setHeader('Content-Type', 'text/event-stream');
@@ -160,6 +171,42 @@ app.get('/api/progress-state/:taskId', (req, res) => {
     const taskId = req.params.taskId;
     const payload = lastProgress.get(taskId) || { state: 'waiting', phase: '等待任务', message: '等待测速任务启动...' };
     res.json({ success: true, data: payload });
+});
+
+app.post('/api/fetch-source', async (req, res) => {
+    const rawUrl = String(req.body?.url || '').trim();
+    if (!rawUrl) return res.status(400).json({ success: false, msg: 'URL 不能为空' });
+    if (rawUrl.length > 500) return res.status(400).json({ success: false, msg: 'URL 过长' });
+
+    let parsed;
+    try {
+        parsed = new URL(rawUrl);
+    } catch {
+        return res.status(400).json({ success: false, msg: 'URL 格式不合法' });
+    }
+    if (!['http:', 'https:'].includes(parsed.protocol)) {
+        return res.status(400).json({ success: false, msg: '仅支持 http/https 地址' });
+    }
+    const host = String(parsed.hostname || '').toLowerCase();
+    if (!host || host === 'localhost' || host.endsWith('.local') || isPrivateIPv4(host)) {
+        return res.status(400).json({ success: false, msg: '不允许拉取本地/内网地址' });
+    }
+
+    try {
+        const response = await fetch(parsed.toString(), {
+            method: 'GET',
+            headers: { 'User-Agent': 'cfst-web-panel/1.0' },
+            signal: AbortSignal.timeout(15000)
+        });
+        if (!response.ok) {
+            return res.status(400).json({ success: false, msg: `上游响应异常: ${response.status}` });
+        }
+        const text = await response.text();
+        const capped = String(text || '').slice(0, 2 * 1024 * 1024);
+        return res.json({ success: true, data: capped });
+    } catch (e) {
+        return res.status(500).json({ success: false, msg: '拉取源地址失败，请稍后重试' });
+    }
 });
 
 // --- 💾 数据库配置：JSON 持久化存储 ---
