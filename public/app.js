@@ -80,7 +80,8 @@ const saveSettingsBtn = document.getElementById('save-settings-btn');
 const resetSettingsBtn = document.getElementById('reset-settings-btn');
 
 let currentView = 'test'; 
-let currentTableData = []; 
+let testTableData = []; 
+let favTableData = []; 
 let parsedTargets = [];
 let progressSource = null;
 let progressPollTimer = null;
@@ -164,7 +165,7 @@ function switchTab(view) {
         if(saveSelectedBtn) saveSelectedBtn.innerText = '💾 收藏';
         tagSelectedBtn?.classList.add('hidden');
         deleteSelectedBtn?.classList.add('hidden');
-        renderTable(currentTableData, '准备就绪，点击底部按钮开始测速');
+        renderTable(testTableData, '准备就绪，点击底部按钮开始测速');
     }
 }
 tabTest?.addEventListener('click', () => { if(currentView !== 'test') switchTab('test'); });
@@ -278,7 +279,8 @@ async function syncToCloudflare(ips, clearOnly = false) {
     finally { syncCfBtn.innerText = oldText; updateSelectionState(); }
 }
 syncCfBtn?.addEventListener('click', () => {
-    const selectedIps = Array.from(document.querySelectorAll('.ip-checkbox:checked')).map(cb => cb.dataset.ip);
+    if (!resultBody) return;
+    const selectedIps = Array.from(resultBody.querySelectorAll('.ip-checkbox:checked')).map(cb => cb.dataset.ip);
     if(selectedIps.length === 0) return showToast('❌ 请先选择节点');
     if(confirm(`确定要将这 ${selectedIps.length} 个 IP 覆盖解析到 CF 吗？`)) syncToCloudflare(selectedIps);
 });
@@ -409,8 +411,8 @@ function renderTable(dataArray, emptyMsg) {
         resultBody.appendChild(tr);
     });
     
-    document.querySelectorAll('.ip-checkbox').forEach(cb => cb.addEventListener('change', updateSelectionState));
-    document.querySelectorAll('.copyable-ip').forEach(el => el.addEventListener('click', () => {
+    resultBody.querySelectorAll('.ip-checkbox').forEach(cb => cb.addEventListener('change', updateSelectionState));
+    resultBody.querySelectorAll('.copyable-ip').forEach(el => el.addEventListener('click', () => {
         const tr = el.closest('tr');
         const cb = tr.querySelector('.ip-checkbox');
         const region = cb?.dataset.region || '';
@@ -425,8 +427,9 @@ function renderTable(dataArray, emptyMsg) {
 }
 
 function updateSelectionState() {
-    const cbs = document.querySelectorAll('.ip-checkbox');
-    const checked = document.querySelectorAll('.ip-checkbox:checked').length;
+    if (!resultBody) return;
+    const cbs = resultBody.querySelectorAll('.ip-checkbox');
+    const checked = resultBody.querySelectorAll('.ip-checkbox:checked').length;
     if(selectedCountSpan) selectedCountSpan.innerText = checked;
     const hasSel = checked > 0;
     
@@ -441,12 +444,15 @@ function updateSelectionState() {
     }
 }
 selectAllCheckbox?.addEventListener('change', (e) => { 
-    document.querySelectorAll('.ip-checkbox').forEach(cb => cb.checked = e.target.checked); 
+    if (!resultBody) return;
+    resultBody.querySelectorAll('.ip-checkbox').forEach(cb => cb.checked = e.target.checked); 
     updateSelectionState(); 
 });
 
 copySelectedBtn?.addEventListener('click', () => {
-    const ips = Array.from(document.querySelectorAll('.ip-checkbox:checked')).map(cb => {
+    if (!resultBody) return;
+    const selected = Array.from(resultBody.querySelectorAll('.ip-checkbox:checked'));
+    const ips = selected.map(cb => {
         const ip = cb.dataset.ip;
         const region = cb.dataset.region || '';
         const tag = cb.dataset.tag || '';
@@ -455,11 +461,12 @@ copySelectedBtn?.addEventListener('click', () => {
         if (tag && tag !== '-') text += `|${tag}`;
         return text;
     }).join('\n');
-    copyToClipboard(ips, `✅ 成功复制 ${document.querySelectorAll('.ip-checkbox:checked').length} 项`);
+    copyToClipboard(ips, `✅ 成功复制 ${selected.length} 项`);
 });
 
 tagSelectedBtn?.addEventListener('click', async () => {
-    const selectedCbs = Array.from(document.querySelectorAll('.ip-checkbox:checked'));
+    if (!resultBody) return;
+    const selectedCbs = Array.from(resultBody.querySelectorAll('.ip-checkbox:checked'));
     if (selectedCbs.length === 0) return showToast('❌ 请先选择节点');
 
     const newTag = prompt(`请输入为这 ${selectedCbs.length} 个节点设置的标签：\n(留空则为清除标签)`);
@@ -480,15 +487,17 @@ async function fetchAndRenderFavorites() {
     resultBody.innerHTML = `<tr><td colspan="${TABLE_COLSPAN}"><div class="spinner" style="margin: 0 auto;"></div></td></tr>`;
     try {
         const res = await fetch('/api/saved-ips'); const json = await res.json();
-        currentTableData = json.success ? json.data.sort((a, b) => b.speed - a.speed) : [];
-        renderTable(currentTableData, '📭 收藏夹空空如也');
+        favTableData = json.success ? json.data.sort((a, b) => b.speed - a.speed) : [];
+        renderTable(favTableData, '📭 收藏夹空空如也');
     } catch (e) { renderTable([], '❌ 获取失败'); }
 }
 
 saveSelectedBtn?.addEventListener('click', async () => {
-    const ipsToSave = Array.from(document.querySelectorAll('.ip-checkbox:checked')).map(cb => {
+    if (!resultBody) return;
+    const dataSource = currentView === 'favorites' ? favTableData : testTableData;
+    const ipsToSave = Array.from(resultBody.querySelectorAll('.ip-checkbox:checked')).map(cb => {
         const ip = cb.dataset.ip;
-        const rowData = currentTableData.find(d => d.ip === ip) || {};
+        const rowData = dataSource.find(d => d.ip === ip) || {};
         return { 
             ip: ip, 
             region: cb.dataset.region || rowData.region,
@@ -503,7 +512,8 @@ saveSelectedBtn?.addEventListener('click', async () => {
 });
 
 deleteSelectedBtn?.addEventListener('click', async () => {
-    const ipsToDelete = Array.from(document.querySelectorAll('.ip-checkbox:checked')).map(cb => cb.dataset.ip);
+    if (!resultBody) return;
+    const ipsToDelete = Array.from(resultBody.querySelectorAll('.ip-checkbox:checked')).map(cb => cb.dataset.ip);
     if(!confirm(`确定删除吗？`)) return;
     try {
         const res = await fetch('/api/delete-ips', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ips: ipsToDelete }) });
@@ -536,7 +546,9 @@ startBtn?.addEventListener('click', async () => {
         progressSource = new EventSource(`/api/progress/${taskId}`);
         progressSource.onmessage = (e) => { try { updateProgressUI(JSON.parse(e.data)); } catch (err) {} };
 
-        const targetIps = currentView === 'favorites' ? Array.from(document.querySelectorAll('.ip-checkbox:checked')).map(cb => cb.dataset.ip) : parsedTargets;
+        const targetIps = currentView === 'favorites'
+            ? Array.from((resultBody?.querySelectorAll('.ip-checkbox:checked') || [])).map(cb => cb.dataset.ip)
+            : parsedTargets;
         if (currentView === 'favorites' && targetIps.length === 0) { throw new Error("请先选择要测速的 IP"); }
 
         const response = await fetch('/api/start-test', { 
@@ -552,10 +564,14 @@ startBtn?.addEventListener('click', async () => {
         const json = await response.json();
 
         if (json.success) {
-            currentTableData = json.data; renderTable(currentTableData, '未能测出有效节点');
             if(currentView === 'favorites') {
+                favTableData = json.data;
+                renderTable(favTableData, '未能测出有效节点');
                 await fetch('/api/save-ips', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ips: json.data }) });
                 fetchAndRenderFavorites();
+            } else {
+                testTableData = json.data;
+                renderTable(testTableData, '未能测出有效节点');
             }
             if(statusTitle) statusTitle.innerText = '完成'; 
             if(loadingSpinner) loadingSpinner.style.display = 'none';
@@ -596,4 +612,4 @@ resetSettingsBtn?.addEventListener('click', async () => {
 if(themeMode) { themeMode.value = localStorage.getItem('theme') || 'system'; applyTheme(themeMode.value); }
 loadCfApiConfig();
 loadCfstConfig();
-renderTable(currentTableData, '准备就绪，点击底部按钮开始测速');
+renderTable(testTableData, '准备就绪，点击底部按钮开始测速');
