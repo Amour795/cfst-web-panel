@@ -28,6 +28,12 @@
 ### 方式一：一键脚本（推荐）
 
 ```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/Amour795/cfst-web-panel/main/install.sh)"
+```
+
+也可以先克隆后执行：
+
+```bash
 git clone https://github.com/Amour795/cfst-web-panel.git
 cd cfst-web-panel
 bash install.sh
