@@ -5,6 +5,7 @@ const path = require('path');
 const cors = require('cors');
 const multer = require('multer');
 const http = require('http');
+const https = require('https');
 const dns = require('dns').promises;
 const crypto = require('crypto');
 
@@ -454,7 +455,7 @@ app.post('/api/regions', async (req, res) => {
 
     const data = {};
     try {
-        await mapWithConcurrency(ips, 8, async (ip) => {
+        await mapWithConcurrency(ips, 5, async (ip) => {
             data[ip] = await getColoCached(ip);
         });
         res.json({ success: true, data });
@@ -474,16 +475,35 @@ const cfColoMap = {
 
 function getColo(ip) {
     return new Promise((resolve) => {
-        const req = http.get(`http://${ip}/cdn-cgi/trace`, { timeout: 1500 }, (res) => {
-            let data = '';
-            res.on('data', chunk => data += chunk);
-            res.on('end', () => {
-                const match = data.match(/colo=([A-Z]+)/);
-                if (match && match[1]) resolve(cfColoMap[match[1]] || `🌐 ${match[1]}`);
-                else resolve('❓ 未知');
+        const probes = [
+            { mod: http, url: `http://${ip}/cdn-cgi/trace`, timeout: 1800 },
+            { mod: https, url: `https://${ip}/cdn-cgi/trace`, timeout: 2200 }
+        ];
+        let idx = 0;
+
+        const runProbe = () => {
+            if (idx >= probes.length) return resolve('❓ 测速节点');
+            const current = probes[idx++];
+            const req = current.mod.get(current.url, { timeout: current.timeout, rejectUnauthorized: false }, (res) => {
+                let data = '';
+                res.on('data', (chunk) => { data += chunk; });
+                res.on('end', () => {
+                    const match = data.match(/colo=([A-Z]+)/);
+                    if (match && match[1]) {
+                        resolve(cfColoMap[match[1]] || `🌐 ${match[1]}`);
+                    } else {
+                        runProbe();
+                    }
+                });
             });
-        }).on('error', () => resolve('❓ 测速节点'))
-          .on('timeout', () => { req.destroy(); resolve('⏳ 超时'); });
+            req.on('error', () => runProbe());
+            req.on('timeout', () => {
+                try { req.destroy(); } catch {}
+                runProbe();
+            });
+        };
+
+        runProbe();
     });
 }
 
@@ -495,7 +515,9 @@ async function getColoCached(ip) {
     if (cache && cache.expireAt > now) return cache.region;
     const region = await getColo(key);
     const normalized = region || '❓ 未知';
-    coloCache.set(key, { region: normalized, expireAt: now + 30 * 60 * 1000 });
+    const isWeakRegion = normalized.includes('超时') || normalized.includes('未知') || normalized.includes('测速节点');
+    const ttl = isWeakRegion ? 90 * 1000 : 30 * 60 * 1000;
+    coloCache.set(key, { region: normalized, expireAt: now + ttl });
     return normalized;
 }
 
@@ -878,7 +900,7 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
             }
         });
         if (pendingRegionIps.length > 0) {
-            mapWithConcurrency([...new Set(pendingRegionIps)], 6, async (ip) => {
+            mapWithConcurrency([...new Set(pendingRegionIps)], 4, async (ip) => {
                 await getColoCached(ip);
             }).catch(() => {});
         }
