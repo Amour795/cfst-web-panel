@@ -23,7 +23,6 @@ const lastProgress = new Map();
 const taskPhase = new Map();
 const lastProgressKey = new Map();
 const coloCache = new Map();
-let scheduleTimer = null;
 
 function logTask(taskId, step, extra) {
     const now = new Date().toISOString();
@@ -205,13 +204,17 @@ async function setSetting(key, value) {
     await saveDb();
 }
 
-async function getCfstConfig() {
-    const defaults = {
+function getOfficialRecommendedCfstConfig() {
+    return {
         n: 200, t: 4, tp: 443, url: 'https://speed.cloudflare.com/__down?bytes=20000000',
         mode: 'tcp', httpingCode: 200, cfcolo: '', dt: 5, dn: 10, dnSingle: 1,
         tl: 9999, tll: 0, tlr: 1, sl: 0, disableDownload: false, allip: false,
         debug: false, topN: 50
     };
+}
+
+async function getCfstConfig() {
+    const defaults = getOfficialRecommendedCfstConfig();
     const raw = await getSetting('cfst_config');
     if (!raw) return defaults;
     try {
@@ -383,6 +386,17 @@ app.post('/api/settings/cfst', async (req, res) => {
     }
 });
 
+app.post('/api/settings/cfst/reset', async (req, res) => {
+    try {
+        const cfg = getOfficialRecommendedCfstConfig();
+        await setSetting('cfst_config', JSON.stringify(cfg));
+        const normalized = await getCfstConfig();
+        res.json({ success: true, data: normalized });
+    } catch (e) {
+        res.status(500).json({ success: false, msg: '恢复官方推荐失败' });
+    }
+});
+
 app.post('/api/regions', async (req, res) => {
     const ipRegex = /^(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)$/;
     const ips = Array.isArray(req.body?.ips)
@@ -398,57 +412,6 @@ app.post('/api/regions', async (req, res) => {
         res.json({ success: true, data });
     } catch (e) {
         res.status(500).json({ success: false, msg: '地区查询失败' });
-    }
-});
-
-app.post('/api/export', async (req, res) => {
-    const format = String(req.body?.format || 'clash').toLowerCase();
-    const rows = Array.isArray(req.body?.items) ? req.body.items : [];
-    const nodes = rows.filter(item => item && item.ip).slice(0, 50);
-    if (nodes.length === 0) {
-        return res.json({ success: false, msg: '没有可导出的节点' });
-    }
-
-    if (format === 'singbox') {
-        const outbounds = nodes.map((item, idx) => ({
-            type: 'http',
-            tag: `cf-${idx + 1}-${item.ip}`,
-            server: item.ip,
-            server_port: 443
-        }));
-        return res.json({ success: true, data: JSON.stringify({ outbounds }, null, 2) });
-    }
-
-    const proxies = nodes.map((item, idx) => ({
-        name: `CF-${idx + 1}-${item.ip}`,
-        type: 'http',
-        server: item.ip,
-        port: 443
-    }));
-    const clash = { proxies, 'proxy-groups': [{ name: 'CF-AUTO', type: 'select', proxies: proxies.map(p => p.name) }] };
-    res.json({ success: true, data: JSON.stringify(clash, null, 2) });
-});
-
-app.post('/api/schedule', async (req, res) => {
-    const body = req.body || {};
-    const enabled = Boolean(body.enabled);
-    const intervalMin = clamp(Number(body.intervalMin) || 60, 10, 1440);
-    const targets = Array.isArray(body.targets) ? body.targets.map(s => String(s || '').trim()).filter(Boolean).slice(0, 200) : [];
-    try {
-        await setSetting('schedule_config', JSON.stringify({ enabled, intervalMin, targets }));
-        if (scheduleTimer) {
-            clearInterval(scheduleTimer);
-            scheduleTimer = null;
-        }
-        if (enabled && targets.length > 0) {
-            scheduleTimer = setInterval(async () => {
-                dbData.last_targets = targets;
-                await saveDb();
-            }, intervalMin * 60 * 1000);
-        }
-        res.json({ success: true, data: { enabled, intervalMin, targetsCount: targets.length } });
-    } catch (e) {
-        res.status(500).json({ success: false, msg: '保存计划任务失败' });
     }
 });
 

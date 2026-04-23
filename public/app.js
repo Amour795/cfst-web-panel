@@ -58,10 +58,6 @@
         const incrementalMode = document.getElementById('incremental-mode');
         const parseTimeoutInput = document.getElementById('parse-timeout');
         const totalTimeoutInput = document.getElementById('total-timeout');
-        const exportFormat = document.getElementById('export-format');
-        const exportBtn = document.getElementById('export-btn');
-        const scheduleInterval = document.getElementById('schedule-interval');
-        const scheduleBtn = document.getElementById('schedule-btn');
         const saveSettingsBtn = document.getElementById('save-settings-btn');
         const resetSettingsBtn = document.getElementById('reset-settings-btn');
 
@@ -72,6 +68,7 @@
         let progressPollTimer = null;
         let lastProgressPercent = 0;
         let regionHydrationSeq = 0;
+        let isFavoriteTesting = false;
         const TABLE_COLSPAN = 8;
         const ipRegexGlobal = /(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)/g;
         const mixedRegex = /(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)|(?:[a-zA-Z0-9][-a-zA-Z0-9]{0,62}\.)+[a-zA-Z]{2,}/g;
@@ -149,6 +146,18 @@
             if (p.includes('解析') || p.includes('dns')) return 'DNS';
             return 'RUN';
         }
+        function setStatusVisualState(phase, state) {
+            statusPanel.classList.remove('phase-dns', 'phase-ping', 'phase-down', 'phase-run', 'state-running', 'state-done', 'state-error');
+            const p = String(phase || '').toLowerCase();
+            if (p.includes('解析') || p.includes('dns')) statusPanel.classList.add('phase-dns');
+            else if (p.includes('ping')) statusPanel.classList.add('phase-ping');
+            else if (p.includes('下载') || p.includes('download')) statusPanel.classList.add('phase-down');
+            else statusPanel.classList.add('phase-run');
+
+            if (state === 'done') statusPanel.classList.add('state-done');
+            else if (state === 'error') statusPanel.classList.add('state-error');
+            else statusPanel.classList.add('state-running');
+        }
 
         function closeProgressStream() {
             if (progressSource) {
@@ -188,6 +197,7 @@
             statusTag.innerText = 'RUN';
             statusDots.style.display = 'inline-flex';
             statusSub.innerText = '测速任务初始化中...';
+            setStatusVisualState('run', 'running');
         }
 
         function sanitizeProgressMessage(message) {
@@ -203,16 +213,27 @@
             if (!payload) return;
             statusTitle.innerText = payload.phase || '测速中';
             statusTag.innerText = getTagForPhase(payload.phase);
+            setStatusVisualState(payload.phase, payload.state);
+            let computedPercentFromRatio = null;
             if (typeof payload.current === 'number' && typeof payload.total === 'number' && payload.total > 0) {
                 statusSub.innerText = `${payload.current}/${payload.total}`;
+                computedPercentFromRatio = Math.max(0, Math.min(100, Math.round((payload.current / payload.total) * 100)));
             } else if (payload.message) {
                 const cleanMessage = sanitizeProgressMessage(payload.message);
                 if (/[\u4e00-\u9fffA-Za-z0-9]/.test(cleanMessage)) {
                     statusSub.innerText = cleanMessage.length > 70 ? `${cleanMessage.slice(0, 70)}...` : cleanMessage;
                 }
             }
-            if (typeof payload.percent === 'number') {
-                let percent = Math.max(0, Math.min(100, Math.round(payload.percent)));
+            if (typeof payload.percent === 'number' || computedPercentFromRatio !== null) {
+                let percent = typeof payload.percent === 'number'
+                    ? Math.max(0, Math.min(100, Math.round(payload.percent)))
+                    : 0;
+                if (computedPercentFromRatio !== null) {
+                    percent = computedPercentFromRatio;
+                }
+                if (payload.state !== 'done' && payload.state !== 'error' && percent >= 100) {
+                    percent = 99;
+                }
                 if (payload.state !== 'done' && payload.state !== 'error') {
                     percent = Math.max(percent, lastProgressPercent);
                 }
@@ -234,9 +255,9 @@
                 testViewContainer.classList.add('hidden');
                 settingsViewContainer.classList.add('hidden');
                 tableCard.classList.remove('hidden');
-                bottomBar.classList.add('hide-down'); // 丝滑隐藏底部按钮
-                saveSelectedBtn.classList.remove('hidden');
-                saveSelectedBtn.innerText = '⚡ 测速选中';
+                bottomBar.classList.remove('hide-down');
+                startBtn.innerText = isFavoriteTesting ? '测速中...' : '测速选中';
+                saveSelectedBtn.classList.add('hidden');
                 tagSelectedBtn.classList.remove('hidden');
                 deleteSelectedBtn.classList.remove('hidden');
                 fetchAndRenderFavorites();
@@ -255,6 +276,8 @@
                 settingsViewContainer.classList.add('hidden');
                 tableCard.classList.remove('hidden');
                 bottomBar.classList.remove('hide-down'); // 弹回底部按钮
+                startBtn.disabled = false;
+                startBtn.innerText = '开始测速';
                 saveSelectedBtn.classList.remove('hidden');
                 saveSelectedBtn.innerText = '💾 收藏';
                 tagSelectedBtn.classList.add('hidden');
@@ -284,27 +307,31 @@
                 const res = await fetch('/api/settings/cfst');
                 const json = await res.json();
                 if (!json.success) return;
-                const cfg = json.data || {};
-                cfstMode.value = cfg.mode || 'tcp';
-                cfstHttpingCodeInput.value = String(cfg.httpingCode ?? '');
-                cfstCfcoloInput.value = cfg.cfcolo || '';
-                cfstTpInput.value = String(cfg.tp ?? '');
-                cfstNInput.value = String(cfg.n ?? '');
-                cfstTInput.value = String(cfg.t ?? '');
-                cfstUrlInput.value = cfg.url || '';
-                cfstDtInput.value = String(cfg.dt ?? '');
-                cfstDnInput.value = String(cfg.dn ?? '');
-                cfstDnSingleInput.value = String(cfg.dnSingle ?? '');
-                cfstTlInput.value = String(cfg.tl ?? '');
-                cfstTllInput.value = String(cfg.tll ?? '');
-                cfstTlrInput.value = String(cfg.tlr ?? '');
-                cfstSlInput.value = String(cfg.sl ?? '');
-                cfstDisableDownload.checked = Boolean(cfg.disableDownload);
-                cfstAllip.checked = Boolean(cfg.allip);
-                cfstDebug.checked = Boolean(cfg.debug);
-                cfstTopNInput.value = String(cfg.topN ?? '');
+                applyCfstConfigToForm(json.data || {});
                 updateCfstModeVisibility();
             } catch (e) {}
+        }
+
+        function applyCfstConfigToForm(cfg) {
+            cfstMode.value = cfg.mode || 'tcp';
+            cfstHttpingCodeInput.value = String(cfg.httpingCode ?? '');
+            cfstCfcoloInput.value = cfg.cfcolo || '';
+            cfstTpInput.value = String(cfg.tp ?? '');
+            cfstNInput.value = String(cfg.n ?? '');
+            cfstTInput.value = String(cfg.t ?? '');
+            cfstUrlInput.value = cfg.url || '';
+            cfstDtInput.value = String(cfg.dt ?? '');
+            cfstDnInput.value = String(cfg.dn ?? '');
+            cfstDnSingleInput.value = String(cfg.dnSingle ?? '');
+            cfstTlInput.value = String(cfg.tl ?? '');
+            cfstTllInput.value = String(cfg.tll ?? '');
+            cfstTlrInput.value = String(cfg.tlr ?? '');
+            cfstSlInput.value = String(cfg.sl ?? '');
+            cfstDisableDownload.checked = Boolean(cfg.disableDownload);
+            cfstAllip.checked = Boolean(cfg.allip);
+            cfstDebug.checked = Boolean(cfg.debug);
+            cfstTopNInput.value = String(cfg.topN ?? '');
+            updateCfstModeVisibility();
         }
 
         async function saveCfstConfig() {
@@ -336,26 +363,7 @@
                 });
                 const json = await res.json();
                 if (json.success) {
-                    const cfg = json.data || {};
-                    cfstMode.value = cfg.mode || 'tcp';
-                    cfstHttpingCodeInput.value = String(cfg.httpingCode ?? '');
-                    cfstCfcoloInput.value = cfg.cfcolo || '';
-                    cfstTpInput.value = String(cfg.tp ?? '');
-                    cfstNInput.value = String(cfg.n ?? '');
-                    cfstTInput.value = String(cfg.t ?? '');
-                    cfstUrlInput.value = cfg.url || '';
-                    cfstDtInput.value = String(cfg.dt ?? '');
-                    cfstDnInput.value = String(cfg.dn ?? '');
-                    cfstDnSingleInput.value = String(cfg.dnSingle ?? '');
-                    cfstTlInput.value = String(cfg.tl ?? '');
-                    cfstTllInput.value = String(cfg.tll ?? '');
-                    cfstTlrInput.value = String(cfg.tlr ?? '');
-                    cfstSlInput.value = String(cfg.sl ?? '');
-                    cfstDisableDownload.checked = Boolean(cfg.disableDownload);
-                    cfstAllip.checked = Boolean(cfg.allip);
-                    cfstDebug.checked = Boolean(cfg.debug);
-                    cfstTopNInput.value = String(cfg.topN ?? '');
-                    updateCfstModeVisibility();
+                    applyCfstConfigToForm(json.data || {});
                     showToast('✅ 设置已保存');
                 } else {
                     showToast('❌ 保存失败: ' + (json.msg || '未知错误'));
@@ -366,63 +374,15 @@
         }
 
         saveSettingsBtn.addEventListener('click', () => saveCfstConfig());
-        resetSettingsBtn.addEventListener('click', () => {
-            cfstMode.value = 'tcp';
-            cfstHttpingCodeInput.value = '200';
-            cfstCfcoloInput.value = '';
-            cfstTpInput.value = '443';
-            cfstNInput.value = '200';
-            cfstTInput.value = '4';
-            cfstUrlInput.value = 'https://speed.cloudflare.com/__down?bytes=20000000';
-            cfstDtInput.value = '5';
-            cfstDnInput.value = '10';
-            cfstDnSingleInput.value = '1';
-            cfstTlInput.value = '9999';
-            cfstTllInput.value = '0';
-            cfstTlrInput.value = '1';
-            cfstSlInput.value = '0';
-            cfstDisableDownload.checked = false;
-            cfstAllip.checked = false;
-            cfstDebug.checked = false;
-            cfstTopNInput.value = '50';
-            saveCfstConfig();
-        });
-
-        exportBtn.addEventListener('click', async () => {
-            if (!Array.isArray(currentTableData) || currentTableData.length === 0) {
-                showToast('❌ 当前没有可导出的结果');
-                return;
-            }
+        resetSettingsBtn.addEventListener('click', async () => {
             try {
-                const res = await fetch('/api/export', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ format: exportFormat.value || 'clash', items: currentTableData })
-                });
+                const res = await fetch('/api/settings/cfst/reset', { method: 'POST' });
                 const json = await res.json();
-                if (!json.success) return showToast('❌ 导出失败');
-                await copyToClipboard(json.data, '✅ 导出内容已复制到剪贴板');
+                if (!json.success) return showToast('❌ 恢复官方推荐失败');
+                applyCfstConfigToForm(json.data || {});
+                showToast('✅ 已恢复官方推荐设置');
             } catch (e) {
-                showToast('❌ 导出失败');
-            }
-        });
-
-        scheduleBtn.addEventListener('click', async () => {
-            try {
-                const res = await fetch('/api/schedule', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        enabled: true,
-                        intervalMin: Number(scheduleInterval.value || 60),
-                        targets: parsedTargets.length > 0 ? parsedTargets : currentTableData.map(item => item.ip).filter(Boolean)
-                    })
-                });
-                const json = await res.json();
-                if (json.success) showToast('✅ 定时任务已保存');
-                else showToast('❌ 定时任务保存失败');
-            } catch (e) {
-                showToast('❌ 定时任务保存失败');
+                showToast('❌ 恢复官方推荐失败');
             }
         });
 
@@ -546,6 +506,10 @@
             tagSelectedBtn.disabled = !hasSelection;
             deleteSelectedBtn.disabled = !hasSelection;
             selectAllCheckbox.checked = hasSelection && checkedCount === checkboxes.length;
+            if (currentView === 'favorites') {
+                startBtn.disabled = !hasSelection || isFavoriteTesting;
+                startBtn.innerText = isFavoriteTesting ? '测速中...' : '测速选中';
+            }
         }
 
         selectAllCheckbox.addEventListener('change', (e) => {
@@ -617,67 +581,76 @@
             }
         }
 
+        async function runFavoritesSelectedTest() {
+            if (isFavoriteTesting) return;
+            const selectedIps = Array.from(document.querySelectorAll('.ip-checkbox:checked')).map(cb => cb.dataset.ip).filter(Boolean);
+            if (selectedIps.length === 0) return showToast('❌ 请先选择要测速的 IP');
+            isFavoriteTesting = true;
+            updateSelectionState();
+            const taskId = `task_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+            try {
+                resetProgressUI();
+                switchTab('test');
+                statusPanel.classList.remove('hidden');
+                statusTitle.innerText = '收藏测速';
+                statusSub.innerText = `正在测速 ${selectedIps.length} 个已收藏 IP...`;
+                closeProgressStream();
+                startProgressPolling(taskId);
+                progressSource = new EventSource(`/api/progress/${encodeURIComponent(taskId)}`);
+                progressSource.onmessage = (event) => {
+                    try { updateProgressUI(JSON.parse(event.data)); } catch (e) {}
+                };
+                progressSource.onerror = () => closeProgressStream();
+
+                const response = await fetch('/api/start-test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        targetIps: selectedIps,
+                        inputMode: 'ip',
+                        taskId,
+                        runtimeOptions: {
+                            incremental: false,
+                            parseTimeoutSec: Number(parseTimeoutInput.value || 25),
+                            totalTimeoutSec: Number(totalTimeoutInput.value || 150),
+                            performanceMode: 'manual',
+                            profile: /mobile/i.test(navigator.userAgent) ? 'mobile' : 'desktop'
+                        }
+                    })
+                });
+                const json = await response.json();
+                if (!json.success) {
+                    showToast(`❌ 测速失败: ${json.msg || '未知错误'}`);
+                    return;
+                }
+
+                const tested = Array.isArray(json.data) ? json.data : [];
+                const saveRes = await fetch('/api/save-ips', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ips: tested })
+                });
+                const saveJson = await saveRes.json();
+                if (saveJson.success) {
+                    const failedCount = Math.max(0, selectedIps.length - tested.length);
+                    showToast(`✅ 已更新 ${saveJson.updated || 0} 个收藏${failedCount > 0 ? `，${failedCount} 个疑似不可用` : ''}`);
+                    fetchAndRenderFavorites();
+                } else {
+                    showToast('❌ 测速结果回写失败');
+                }
+            } catch (e) {
+                showToast('❌ 收藏测速失败');
+            } finally {
+                isFavoriteTesting = false;
+                updateSelectionState();
+                setTimeout(() => closeProgressStream(), 800);
+                stopProgressPolling();
+            }
+        }
+
         saveSelectedBtn.addEventListener('click', async () => {
             if (currentView === 'favorites') {
-                const selectedIps = Array.from(document.querySelectorAll('.ip-checkbox:checked')).map(cb => cb.dataset.ip).filter(Boolean);
-                if (selectedIps.length === 0) return showToast('❌ 请先选择要测速的 IP');
-                const taskId = `task_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
-                try {
-                    resetProgressUI();
-                    switchTab('test');
-                    statusPanel.classList.remove('hidden');
-                    statusTitle.innerText = '收藏测速';
-                    statusSub.innerText = `正在测速 ${selectedIps.length} 个已收藏 IP...`;
-                    closeProgressStream();
-                    startProgressPolling(taskId);
-                    progressSource = new EventSource(`/api/progress/${encodeURIComponent(taskId)}`);
-                    progressSource.onmessage = (event) => {
-                        try { updateProgressUI(JSON.parse(event.data)); } catch (e) {}
-                    };
-                    progressSource.onerror = () => closeProgressStream();
-
-                    const response = await fetch('/api/start-test', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            targetIps: selectedIps,
-                            inputMode: 'ip',
-                            taskId,
-                            runtimeOptions: {
-                                incremental: false,
-                                parseTimeoutSec: Number(parseTimeoutInput.value || 25),
-                                totalTimeoutSec: Number(totalTimeoutInput.value || 150),
-                                performanceMode: 'manual',
-                                profile: /mobile/i.test(navigator.userAgent) ? 'mobile' : 'desktop'
-                            }
-                        })
-                    });
-                    const json = await response.json();
-                    if (!json.success) {
-                        showToast(`❌ 测速失败: ${json.msg || '未知错误'}`);
-                        return;
-                    }
-
-                    const tested = Array.isArray(json.data) ? json.data : [];
-                    const saveRes = await fetch('/api/save-ips', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ ips: tested })
-                    });
-                    const saveJson = await saveRes.json();
-                    if (saveJson.success) {
-                        const failedCount = Math.max(0, selectedIps.length - tested.length);
-                        showToast(`✅ 已更新 ${saveJson.updated || 0} 个收藏${failedCount > 0 ? `，${failedCount} 个疑似不可用` : ''}`);
-                        fetchAndRenderFavorites();
-                    } else {
-                        showToast('❌ 测速结果回写失败');
-                    }
-                } catch (e) {
-                    showToast('❌ 收藏测速失败');
-                } finally {
-                    setTimeout(() => closeProgressStream(), 800);
-                    stopProgressPolling();
-                }
+                await runFavoritesSelectedTest();
                 return;
             }
 
@@ -702,6 +675,10 @@
 
         // --- 启动测速 ---
         startBtn.addEventListener('click', async () => {
+            if (currentView === 'favorites') {
+                await runFavoritesSelectedTest();
+                return;
+            }
             startBtn.disabled = true; startBtn.innerText = '测速中...';
             resetProgressUI();
             
@@ -752,6 +729,9 @@
                     progressLabel.innerText = '100%';
                     statusTitle.innerText = '完成';
                     statusSub.innerText = `测速完毕：${json.data.length} 个节点`;
+                    statusTag.innerText = 'DONE';
+                    statusDots.style.display = 'none';
+                    setStatusVisualState('done', 'done');
                     stopProgressPolling();
                 } else { showToast('测速失败: ' + json.msg); statusPanel.classList.add('hidden'); }
             } catch (error) { showToast('网络请求失败！请检查后端'); statusPanel.classList.add('hidden'); } 
