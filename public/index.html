@@ -291,7 +291,16 @@
                 <div class="setting-row">
                     <label for="cfst-url">下载测速 URL</label>
                     <input id="cfst-url" type="text" placeholder="https://speed.cloudflare.com/__down?bytes=20000000">
-                    <div class="setting-hint">默认地址不保证可用性，建议自建。</div>
+                    <select id="cfst-url-preset">
+                        <option value="custom">自定义（手动输入）</option>
+                        <option value="cf_5m">官方极速（Cloudflare 5MB）</option>
+                        <option value="cf_20m">官方平衡（Cloudflare 20MB）</option>
+                        <option value="cf_50m">官方精确（Cloudflare 50MB）</option>
+                        <option value="cf_100m">官方高压（Cloudflare 100MB）</option>
+                        <option value="ovh_100m">备用 OVH（100MB）</option>
+                        <option value="ovh_1g">备用 OVH（1GB）</option>
+                    </select>
+                    <div class="setting-hint">推荐优先使用官方预设；若你有自建地址可切换到“自定义”。</div>
                 </div>
                 <div class="setting-row">
                     <label for="cfst-dt">下载测速时长（秒）</label>

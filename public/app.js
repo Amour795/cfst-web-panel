@@ -44,6 +44,7 @@
         const cfstNInput = document.getElementById('cfst-n');
         const cfstTInput = document.getElementById('cfst-t');
         const cfstUrlInput = document.getElementById('cfst-url');
+        const cfstUrlPreset = document.getElementById('cfst-url-preset');
         const cfstDtInput = document.getElementById('cfst-dt');
         const cfstDnInput = document.getElementById('cfst-dn');
         const cfstDnSingleInput = document.getElementById('cfst-dn-single');
@@ -110,6 +111,19 @@
                 .toUpperCase();
             if (!cleaned) return 'UNKNOWN';
             return REGION_CODE_MAP[cleaned] || cleaned;
+        }
+        const URL_PRESET_MAP = {
+            cf_5m: 'https://speed.cloudflare.com/__down?bytes=5000000',
+            cf_20m: 'https://speed.cloudflare.com/__down?bytes=20000000',
+            cf_50m: 'https://speed.cloudflare.com/__down?bytes=50000000',
+            cf_100m: 'https://speed.cloudflare.com/__down?bytes=100000000',
+            ovh_100m: 'https://proof.ovh.net/files/100Mb.dat',
+            ovh_1g: 'https://proof.ovh.net/files/1Gb.dat'
+        };
+        function syncUrlPresetSelection(url) {
+            const normalized = String(url || '').trim();
+            const match = Object.entries(URL_PRESET_MAP).find(([, value]) => value === normalized);
+            cfstUrlPreset.value = match ? match[0] : 'custom';
         }
         
         const THEME_KEY = 'cfst_theme_mode';
@@ -301,6 +315,13 @@
         }
 
         cfstMode.addEventListener('change', () => updateCfstModeVisibility());
+        cfstUrlPreset.addEventListener('change', () => {
+            const key = cfstUrlPreset.value;
+            if (key === 'custom') return;
+            const url = URL_PRESET_MAP[key];
+            if (url) cfstUrlInput.value = url;
+        });
+        cfstUrlInput.addEventListener('input', () => syncUrlPresetSelection(cfstUrlInput.value));
 
         async function loadCfstConfig() {
             try {
@@ -320,6 +341,7 @@
             cfstNInput.value = String(cfg.n ?? '');
             cfstTInput.value = String(cfg.t ?? '');
             cfstUrlInput.value = cfg.url || '';
+            syncUrlPresetSelection(cfg.url || '');
             cfstDtInput.value = String(cfg.dt ?? '');
             cfstDnInput.value = String(cfg.dn ?? '');
             cfstDnSingleInput.value = String(cfg.dnSingle ?? '');
