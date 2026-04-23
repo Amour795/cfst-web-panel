@@ -781,7 +781,7 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
     };
 
     const child = spawn('./cfst', args, { cwd: __dirname });
-    const watchdog = setTimeout(() => { try { child.kill('SIGKILL'); } catch {} finish(500, '测速超时', '执行超时'); }, clamp(opts.totalTimeoutSec || 150, 20, 600) * 1000);
+    const watchdog = setTimeout(() => { try { child.kill('SIGKILL'); } catch {} finish(500, '测速超时', '执行超时'); }, totalTimeoutMs);
     runningTasks.set(taskId, { child, watchdog });
 
     let stdoutBuffer = '';
