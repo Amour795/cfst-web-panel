@@ -49,7 +49,7 @@
         .setting-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
         
         .input-actions { display: flex; justify-content: space-between; align-items: center; margin-top: 0.25rem; }
-        .source-fetch { display: flex; gap: 0.5rem; align-items: center; }
+        .source-fetch { display: flex; gap: 0.5rem; flex-direction: column; }
         .source-fetch select, .source-fetch input { flex: 1; min-height: 2.55rem; border: 1px solid #cbd5e1; border-radius: 0.5rem; padding: 0.65rem 0.75rem; background: #f8fafc; outline: none; }
         .tool-btn { background: none; border: 1px solid #cbd5e1; padding: 0.4rem 0.8rem; border-radius: 0.5rem; font-size: 0.8rem; color: #475569; font-weight: 600; cursor: pointer; transition: all 0.2s; }
         .tool-btn:hover { background: #f1f5f9; border-color: #94a3b8; }
@@ -243,7 +243,8 @@
                 <table>
                     <thead>
                         <tr>
-                            <th class="text-center" style="width: 40px;"><input type="checkbox" id="select-all"></th>
+                            <th class="text-center" style="width: 40px;">
+                                <input type="checkbox" id="select-all"></th>
                             <th>地区 / 节点</th><th>物理 IP (点击复制)</th><th class="text-center">延迟</th><th class="text-right" style="color: #4f46e5;">下载 (MB/s)</th><th class="text-center">标签</th><th class="text-center">较上次</th>
                         </tr>
                     </thead>
