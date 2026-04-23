@@ -13,6 +13,7 @@ const os = require('os');
 const app = express();
 const DEFAULT_PORT = Number(process.env.PORT) || 3088;
 const MAX_PORT_RETRY = 20;
+const MAX_TIMER_MS = 2147483647; // Node.js setTimeout 安全上限（约 24.8 天）
 
 app.use(express.json());
 app.use(cors());
@@ -413,7 +414,7 @@ function getOfficialRecommendedCfstConfig() {
         n: 200, t: 4, tp: 443, url: 'https://speed.cloudflare.com/__down?bytes=20000000',
         mode: 'tcp', httpingCode: 200, cfcolo: '', dt: 5, dn: 10, dnSingle: 1,
         tl: 9999, tll: 0, tlr: 1, sl: 0, disableDownload: false, allip: false,
-        debug: false, topN: 50
+        debug: false, topN: 50, parseTimeoutSec: 25, totalTimeoutSec: 900
     };
 }
 
@@ -426,6 +427,8 @@ async function getCfstConfig() {
         const mode = parsed.mode === 'http' ? 'http' : 'tcp';
         const cfcoloNormalized = typeof parsed.cfcolo === 'string' ? parsed.cfcolo.trim() : '';
         const tlr = Number(parsed.tlr);
+        const parseTimeoutSec = Number(parsed.parseTimeoutSec);
+        const totalTimeoutSec = Number(parsed.totalTimeoutSec);
         return {
             n: Number.isFinite(Number(parsed.n)) ? Math.max(1, Math.min(1000, Number(parsed.n))) : defaults.n,
             t: Number.isFinite(Number(parsed.t)) ? Math.max(1, Math.min(20, Number(parsed.t))) : defaults.t,
@@ -444,7 +447,9 @@ async function getCfstConfig() {
             disableDownload: Boolean(parsed.disableDownload),
             allip: Boolean(parsed.allip),
             debug: Boolean(parsed.debug),
-            topN: Number.isFinite(Number(parsed.topN)) ? Math.max(1, Math.min(200, Number(parsed.topN))) : defaults.topN
+            topN: Number.isFinite(Number(parsed.topN)) ? Math.max(1, Math.min(200, Number(parsed.topN))) : defaults.topN,
+            parseTimeoutSec: Number.isFinite(parseTimeoutSec) ? Math.max(1, parseTimeoutSec) : defaults.parseTimeoutSec,
+            totalTimeoutSec: Number.isFinite(totalTimeoutSec) ? Math.max(1, totalTimeoutSec) : defaults.totalTimeoutSec
         };
     } catch { return defaults; }
 }
@@ -656,7 +661,7 @@ function getAdaptiveConfig(base, opts, count) {
 }
 
 const cfGlobalDnsServers = [ ['8.8.8.8', '8.8.4.4'], ['1.1.1.1', '1.0.0.1'], ['208.67.222.222', '208.67.220.220'] ];
-async function resolveTargets(targets) {
+async function resolveTargets(targets, parseTimeoutMs = 25000) {
     const finalIps = new Set();
     const domains = [];
     const ipv4Str = '(?:(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.){3}(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)';
@@ -671,7 +676,8 @@ async function resolveTargets(targets) {
     });
 
     if (domains.length > 0) {
-        const resolveWithTimeout = async (resolver, domain, type, timeoutMs = 2500) => {
+        const dnsTimeoutMs = Math.max(1000, Math.min(Number(parseTimeoutMs) || 25000, MAX_TIMER_MS));
+        const resolveWithTimeout = async (resolver, domain, type, timeoutMs = dnsTimeoutMs) => {
             let timer = null;
             try {
                 const prom = type === 'AAAA' ? resolver.resolve6(domain) : resolver.resolve4(domain);
@@ -692,8 +698,8 @@ async function resolveTargets(targets) {
             const resolver = new dns.Resolver();
             resolver.setServers(servers);
             const [r4, r6] = await Promise.all([
-                resolveWithTimeout(resolver, domain, 'A', 2500),
-                resolveWithTimeout(resolver, domain, 'AAAA', 2500)
+                resolveWithTimeout(resolver, domain, 'A'),
+                resolveWithTimeout(resolver, domain, 'AAAA')
             ]);
             [...r4, ...r6].forEach(ip => finalIps.add(ip));
         });
@@ -712,8 +718,11 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
 
     const runtimeOptions = req.body?.runtimeOptions || {};
     const inputMode = String(req.body?.inputMode || 'ip').toLowerCase();
-    const parseTimeoutMs = clamp(Number(runtimeOptions.parseTimeoutSec) || 25, 5, 120) * 1000;
-    const totalTimeoutMs = clamp(Number(runtimeOptions.totalTimeoutSec) || 150, 20, 600) * 1000;
+    const baseConfig = await getCfstConfig();
+    const parseTimeoutSec = runtimeOptions.parseTimeoutSec ?? baseConfig.parseTimeoutSec;
+    const totalTimeoutSec = runtimeOptions.totalTimeoutSec ?? baseConfig.totalTimeoutSec;
+    const parseTimeoutMs = Math.max(1000, Math.min((Math.max(1, Number(parseTimeoutSec) || 25) * 1000), MAX_TIMER_MS));
+    const totalTimeoutMs = Math.max(1000, Math.min((Math.max(1, Number(totalTimeoutSec) || 900) * 1000), MAX_TIMER_MS));
     const incremental = Boolean(runtimeOptions.incremental);
     const incrementalDownOnly = Boolean(runtimeOptions.incrementalDownOnly);
     sendProgress(taskId, { state: 'start', phase: '准备中', message: '测速任务初始化中...' });
@@ -747,7 +756,6 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
         }
     }
 
-    const baseConfig = await getCfstConfig();
     const cfstConfig = getAdaptiveConfig(baseConfig, runtimeOptions, rawTargets.length);
     const args = ['-n', String(cfstConfig.n), '-t', String(cfstConfig.t), '-tp', String(cfstConfig.tp), '-tl', String(cfstConfig.tl), '-tll', String(cfstConfig.tll), '-tlr', String(cfstConfig.tlr), '-sl', String(cfstConfig.sl)];
     if (cfstConfig.mode === 'http') { args.push('-httping', '-httping-code', String(cfstConfig.httpingCode)); if (cfstConfig.cfcolo) args.push('-cfcolo', cfstConfig.cfcolo); }
@@ -758,7 +766,7 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
     let inputIps = null;
     if (rawTargets.length > 0) {
         sendProgress(taskId, { state: 'running', phase: '解析目标', message: `解析 ${rawTargets.length} 个目标...` });
-        let resolvedIps = await resolveTargets(rawTargets);
+        let resolvedIps = await resolveTargets(rawTargets, parseTimeoutMs);
         if (!resolvedIps.length) {
             sendProgress(taskId, { state: 'error', phase: '解析失败', message: '未解析出有效 IP' });
             closeProgress(taskId); return res.json({ success: false, msg: '未解析出有效 IP' });

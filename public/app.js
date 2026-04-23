@@ -146,6 +146,8 @@ function switchTab(view) {
         tabSettings?.classList.add('active');
         settingsViewContainer?.classList.remove('hidden');
         bottomBar?.classList.add('hide-down');
+        loadCfApiConfig();
+        loadCfstConfig();
         if(pageDesc) pageDesc.innerText = '测速引擎核心参数与面板外观偏好设置';
     } else if (view === 'dns') {
         tabDns?.classList.add('active');
@@ -586,24 +588,67 @@ startBtn?.addEventListener('click', async () => {
 
 async function loadCfstConfig() {
     try {
-        const res = await fetch('/api/settings/cfst'); const json = await res.json();
+        const res = await fetch(`/api/settings/cfst?_=${Date.now()}`); const json = await res.json();
         if (json.success) {
             const c = json.data; 
             if(cfstMode) cfstMode.value = c.mode||'tcp'; 
+            if(cfstHttpingCodeInput) cfstHttpingCodeInput.value = c.httpingCode ?? '';
+            if(cfstCfcoloInput) cfstCfcoloInput.value = c.cfcolo || '';
             if(cfstUrlInput) cfstUrlInput.value = c.url||'';
-            if(cfstDtInput) cfstDtInput.value = c.dt||''; 
-            if(cfstDnInput) cfstDnInput.value = c.dn||''; 
-            if(cfstNInput) cfstNInput.value = c.n||'';
-            if(cfstTpInput) cfstTpInput.value = c.tp||''; 
-            if(cfstTopNInput) cfstTopNInput.value = c.topN||'';
+            if(cfstDtInput) cfstDtInput.value = c.dt ?? ''; 
+            if(cfstDnInput) cfstDnInput.value = c.dn ?? ''; 
+            if(cfstDnSingleInput) cfstDnSingleInput.value = c.dnSingle ?? '';
+            if(cfstNInput) cfstNInput.value = c.n ?? '';
+            if(cfstTInput) cfstTInput.value = c.t ?? '';
+            if(cfstTpInput) cfstTpInput.value = c.tp ?? ''; 
+            if(cfstTlInput) cfstTlInput.value = c.tl ?? '';
+            if(cfstTllInput) cfstTllInput.value = c.tll ?? '';
+            if(cfstTlrInput) cfstTlrInput.value = c.tlr ?? '';
+            if(cfstSlInput) cfstSlInput.value = c.sl ?? '';
+            if(cfstDisableDownload) cfstDisableDownload.checked = !!c.disableDownload;
+            if(cfstAllip) cfstAllip.checked = !!c.allip;
+            if(cfstDebug) cfstDebug.checked = !!c.debug;
+            if(cfstTopNInput) cfstTopNInput.value = c.topN ?? '';
+            if(parseTimeoutInput) parseTimeoutInput.value = c.parseTimeoutSec ?? 25;
+            if(totalTimeoutInput) totalTimeoutInput.value = c.totalTimeoutSec ?? 900;
             updateCfstModeVisibility();
         }
     } catch (e) {}
 }
 cfstMode?.addEventListener('change', updateCfstModeVisibility);
 saveSettingsBtn?.addEventListener('click', async () => {
-    const payload = { mode: cfstMode?.value, url: cfstUrlInput?.value, dt: Number(cfstDtInput?.value), dn: Number(cfstDnInput?.value), n: Number(cfstNInput?.value), tp: Number(cfstTpInput?.value), topN: Number(cfstTopNInput?.value) };
-    try { await fetch('/api/settings/cfst', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) }); showToast('✅ 设置已保存'); } catch (e) {}
+    const payload = {
+        mode: cfstMode?.value,
+        httpingCode: Number(cfstHttpingCodeInput?.value),
+        cfcolo: (cfstCfcoloInput?.value || '').trim(),
+        url: cfstUrlInput?.value,
+        dt: Number(cfstDtInput?.value),
+        dn: Number(cfstDnInput?.value),
+        dnSingle: Number(cfstDnSingleInput?.value),
+        n: Number(cfstNInput?.value),
+        t: Number(cfstTInput?.value),
+        tp: Number(cfstTpInput?.value),
+        tl: Number(cfstTlInput?.value),
+        tll: Number(cfstTllInput?.value),
+        tlr: Number(cfstTlrInput?.value),
+        sl: Number(cfstSlInput?.value),
+        disableDownload: !!cfstDisableDownload?.checked,
+        allip: !!cfstAllip?.checked,
+        debug: !!cfstDebug?.checked,
+        topN: Number(cfstTopNInput?.value),
+        parseTimeoutSec: Number(parseTimeoutInput?.value),
+        totalTimeoutSec: Number(totalTimeoutInput?.value)
+    };
+    try {
+        const res = await fetch('/api/settings/cfst', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+        const json = await res.json();
+        if (json?.success) {
+            await loadCfstConfig();
+            showToast('✅ 设置已保存');
+        } else {
+            showToast('❌ 设置保存失败');
+        }
+    } catch (e) { showToast('❌ 设置保存失败'); }
 });
 resetSettingsBtn?.addEventListener('click', async () => {
     try { const res = await fetch('/api/settings/cfst/reset', { method: 'POST' }); if ((await res.json()).success) { loadCfstConfig(); showToast('✅ 已恢复官方推荐设置'); } } catch (e) {}

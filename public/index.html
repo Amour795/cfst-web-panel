@@ -102,7 +102,17 @@
         body.dark { background-color: #0b1220; color: #e5e7eb; }
         body.dark .glass-card, body.dark .tab-switcher, body.dark .action-bar, body.dark .bottom-bar { background: rgba(15, 23, 42, 0.7); border-color: rgba(148, 163, 184, 0.16); }
         body.dark textarea, body.dark input, body.dark select { background: rgba(15, 23, 42, 0.6); border-color: rgba(148, 163, 184, 0.25); color: #e5e7eb; }
+        body.dark .input-area textarea:focus,
+        body.dark .setting-row input:focus,
+        body.dark .setting-row select:focus,
+        body.dark .source-fetch select:focus,
+        body.dark .source-fetch input:focus {
+            background: rgba(15, 23, 42, 0.9);
+            border-color: #6366f1;
+            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25);
+        }
         body.dark .tab-btn, body.dark .text-slate-500 { color: #94a3b8; }
+        body.dark .tab-btn.active { background: rgba(30, 41, 59, 0.9); color: #e2e8f0; box-shadow: 0 1px 3px rgba(0,0,0,0.35); }
         body.dark th { background-color: rgba(30, 41, 59, 0.35); color: #94a3b8; }
         body.dark td, body.dark .text-slate-800 { color: #e5e7eb; border-bottom-color: rgba(148, 163, 184, 0.12); }
     </style>
@@ -221,7 +231,7 @@
                 <div class="setting-row"><label><input id="incremental-mode" type="checkbox" checked> 增量测速模式</label></div>
                 <div class="setting-row"><label><input id="incremental-down-only" type="checkbox"> 仅重测速度下降节点</label></div>
                 <div class="setting-row"><label>解析超时（秒）</label><input id="parse-timeout" type="number" value="25"></div>
-                <div class="setting-row"><label>任务总超时（秒）</label><input id="total-timeout" type="number" value="150"></div>
+                <div class="setting-row"><label>任务总超时（秒）</label><input id="total-timeout" type="number" value="900"></div>
                 
                 <div id="cfst-httping-box" class="setting-row mode-collapsible is-collapsed"><label>HTTPing 有效状态码</label><input id="cfst-httping-code" type="number"></div>
                 <div id="cfst-cfcolo-box" class="setting-row mode-collapsible is-collapsed"><label>限制地区（IATA 码）</label><input id="cfst-cfcolo" type="text"></div>
