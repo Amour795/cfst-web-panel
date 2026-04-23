@@ -430,9 +430,24 @@ async function fetchAndRenderFavorites() {
 }
 
 saveSelectedBtn?.addEventListener('click', async () => {
-    const ipsToSave = Array.from(document.querySelectorAll('.ip-checkbox:checked')).map(cb => ({ ip: cb.dataset.ip, region: cb.dataset.region }));
+    // 修复：收藏时一并提取当前表格中的 ping 和 speed
+    const ipsToSave = Array.from(document.querySelectorAll('.ip-checkbox:checked')).map(cb => {
+        const ip = cb.dataset.ip;
+        const rowData = currentTableData.find(d => d.ip === ip) || {};
+        return { 
+            ip: ip, 
+            region: cb.dataset.region || rowData.region,
+            ping: rowData.ping,
+            speed: rowData.speed
+        };
+    });
+
     try {
-        const res = await fetch('/api/save-ips', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ips: ipsToSave }) });
+        const res = await fetch('/api/save-ips', { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ ips: ipsToSave }) 
+        });
         if ((await res.json()).success) showToast(`🌟 收藏成功`);
     } catch (e) {}
 });

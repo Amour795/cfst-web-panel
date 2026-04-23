@@ -400,9 +400,21 @@ function computeDelta(ip, ping, speed) {
 
 app.get('/api/saved-ips', async (req, res) => {
     try {
-        const rows = [...dbData.saved_ips].map(item => ({
-            ...item, ...computeDelta(item.ip, item.ping, item.speed)
-        })).sort((a, b) => b.created_at - a.created_at);
+        const rows = [...dbData.saved_ips].map(item => {
+            // 智能兜底：如果收藏时没有保存速度，去历史记录里找最新的一次
+            const hist = dbData.test_history[item.ip] || [];
+            const latest = hist.length > 0 ? hist[hist.length - 1] : {};
+            
+            const ping = item.ping !== undefined ? item.ping : (latest.ping || 0);
+            const speed = item.speed !== undefined ? item.speed : (latest.speed || 0);
+
+            return {
+                ...item,
+                ping,
+                speed,
+                ...computeDelta(item.ip, ping, speed)
+            };
+        }).sort((a, b) => b.created_at - a.created_at);
         res.json({ success: true, data: rows });
     } catch (e) { res.status(500).json({ success: false }); }
 });
