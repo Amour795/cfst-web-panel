@@ -258,16 +258,22 @@ update_code() {
         backup_dir=".install-runtime-backup.$(date +%s)"
         mkdir -p "$backup_dir"
         for rf in "${runtime_files[@]}"; do
-            [ -e "$rf" ] && cp -f "$rf" "$backup_dir/$rf"
+            if [ -e "$rf" ]; then
+                cp -f "$rf" "$backup_dir/$rf"
+            fi
         done
+        return 0
     }
 
     restore_runtime_changes() {
         [ -n "$backup_dir" ] || return 0
         for rf in "${runtime_files[@]}"; do
-            [ -e "$backup_dir/$rf" ] && cp -f "$backup_dir/$rf" "$rf"
+            if [ -e "$backup_dir/$rf" ]; then
+                cp -f "$backup_dir/$rf" "$rf"
+            fi
         done
         rm -rf "$backup_dir"
+        return 0
     }
 
     info "拉取最新代码..."
