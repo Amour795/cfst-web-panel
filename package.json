@@ -2,16 +2,25 @@
   "name": "cf",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js",
+    "build:min": "terser ./public/app.js -c -m -o ./public/min.js",
+    "build": "npm run build:min",
+    "test": "echo \"No tests configured\""
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "cors": "^2.8.6",
     "express": "^4.22.1",
     "multer": "^2.1.1"
+  },
+  "devDependencies": {
+    "terser": "^5.39.2"
   }
 }

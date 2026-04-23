@@ -25,6 +25,8 @@ const lastProgress = new Map();
 const taskPhase = new Map();
 const lastProgressKey = new Map();
 const coloCache = new Map();
+const runningTasks = new Map();
+const MIN_NODE_MAJOR = 18;
 
 function logTask(taskId, step, extra) {
     const now = new Date().toISOString();
@@ -98,6 +100,10 @@ function closeProgress(taskId, keepMs = 15000) {
         taskPhase.delete(taskId);
         lastProgressKey.delete(taskId);
     }, keepMs);
+}
+
+function detachRunningTask(taskId) {
+    runningTasks.delete(taskId);
 }
 
 function parseProgressLine(line) {
@@ -174,6 +180,59 @@ app.get('/api/progress-state/:taskId', (req, res) => {
     res.json({ success: true, data: payload });
 });
 
+app.get('/api/local-health', async (req, res) => {
+    const checks = [];
+    const pushCheck = (name, ok, detail) => checks.push({ name, ok: Boolean(ok), detail: detail || '' });
+    try {
+        const major = Number(String(process.versions.node || '').split('.')[0] || 0);
+        pushCheck('node-version', major >= MIN_NODE_MAJOR, `current=v${process.versions.node}, required>=${MIN_NODE_MAJOR}`);
+
+        const cfstPath = path.join(__dirname, 'cfst');
+        const exists = fs.existsSync(cfstPath);
+        pushCheck('cfst-exists', exists, exists ? cfstPath : 'cfst not found');
+        if (exists) {
+            try {
+                fs.accessSync(cfstPath, fs.constants.X_OK);
+                pushCheck('cfst-executable', true, 'ok');
+            } catch {
+                pushCheck('cfst-executable', false, 'chmod +x cfst required');
+            }
+        } else {
+            pushCheck('cfst-executable', false, 'skipped');
+        }
+
+        try {
+            await fs.promises.access(path.dirname(DB_FILE), fs.constants.W_OK);
+            pushCheck('runtime-dir-writable', true, path.dirname(DB_FILE));
+        } catch {
+            pushCheck('runtime-dir-writable', false, path.dirname(DB_FILE));
+        }
+        pushCheck('running-task-count', true, String(runningTasks.size));
+        const ok = checks.every((item) => item.ok);
+        res.json({ success: true, data: { ok, checks } });
+    } catch (e) {
+        res.status(500).json({ success: false, msg: '健康检查失败' });
+    }
+});
+
+app.post('/api/stop-test', async (req, res) => {
+    const taskId = String(req.body?.taskId || '').trim();
+    if (!taskId) return res.status(400).json({ success: false, msg: 'taskId 不能为空' });
+    const task = runningTasks.get(taskId);
+    if (!task) return res.json({ success: true, stopped: false, msg: '任务不存在或已结束' });
+    try {
+        if (task.watchdog) clearTimeout(task.watchdog);
+        task.stoppedByUser = true;
+        try { task.child.kill('SIGKILL'); } catch {}
+        sendProgress(taskId, { state: 'error', phase: '用户中止', message: '任务已手动停止' });
+        closeProgress(taskId);
+        detachRunningTask(taskId);
+        return res.json({ success: true, stopped: true });
+    } catch {
+        return res.status(500).json({ success: false, msg: '停止任务失败' });
+    }
+});
+
 app.post('/api/fetch-source', async (req, res) => {
     const rawUrl = String(req.body?.url || '').trim();
     if (!rawUrl) return res.status(400).json({ success: false, msg: 'URL 不能为空' });
@@ -214,6 +273,23 @@ app.post('/api/fetch-source', async (req, res) => {
 const DB_FILE = path.join(__dirname, 'database.json');
 const LEGACY_JSON_FILE = path.join(__dirname, 'saved_ips.json');
 let dbData = { saved_ips: [], settings: {}, test_history: {}, last_targets: [] };
+let dbSaveQueue = Promise.resolve();
+
+function ensureLocalRuntimeReady() {
+    const major = Number(String(process.versions.node || '').split('.')[0] || 0);
+    if (!Number.isFinite(major) || major < MIN_NODE_MAJOR) {
+        throw new Error(`Node.js 版本过低：当前 v${process.versions.node}，请升级到 >= ${MIN_NODE_MAJOR}`);
+    }
+    const cfstPath = path.join(__dirname, 'cfst');
+    if (!fs.existsSync(cfstPath)) {
+        throw new Error('缺少 cfst 可执行文件，请先下载并放到项目根目录');
+    }
+    try {
+        fs.accessSync(cfstPath, fs.constants.X_OK);
+    } catch {
+        throw new Error('cfst 未设置可执行权限，请执行 chmod +x cfst');
+    }
+}
 
 async function initDb() {
     try {
@@ -237,11 +313,17 @@ async function initDb() {
 }
 
 async function saveDb() {
-    try {
-        await fs.promises.writeFile(DB_FILE, JSON.stringify(dbData, null, 2));
-    } catch (e) {
-        console.error('数据库保存失败:', e);
-    }
+    dbSaveQueue = dbSaveQueue
+        .catch(() => {})
+        .then(async () => {
+            const tmpFile = `${DB_FILE}.tmp`;
+            await fs.promises.writeFile(tmpFile, JSON.stringify(dbData, null, 2));
+            await fs.promises.rename(tmpFile, DB_FILE);
+        })
+        .catch((e) => {
+            console.error('数据库保存失败:', e);
+        });
+    await dbSaveQueue;
 }
 
 async function getSetting(key) {
@@ -337,7 +419,14 @@ async function migrateLegacySavedIpsIfNeeded() {
 
 app.get('/api/saved-ips', async (req, res) => {
     try {
-        const rows = [...dbData.saved_ips].sort((a, b) => b.created_at - a.created_at);
+        const rows = [...dbData.saved_ips]
+            .map((item) => ({
+                ...item,
+                healthScore: computeHealthScore(item),
+                trend: computeTrend(item.ip, item.speed),
+                ...computeDelta(item.ip, item.ping, item.speed)
+            }))
+            .sort((a, b) => b.created_at - a.created_at);
         res.json({ success: true, data: rows });
     } catch (e) {
         res.status(500).json({ success: false, msg: '读取收藏失败' });
@@ -570,6 +659,31 @@ function computeTrend(ip, currentSpeed) {
     return 'stable';
 }
 
+function computeDelta(ip, currentPing, currentSpeed) {
+    const hist = Array.isArray(dbData.test_history[ip]) ? dbData.test_history[ip] : [];
+    if (hist.length === 0) return { deltaSpeed: null, deltaPing: null };
+    const last = hist[hist.length - 1];
+    const prevSpeed = Number.isFinite(Number(last.speed)) ? Number(last.speed) : null;
+    const prevPing = Number.isFinite(Number(last.ping)) ? Number(last.ping) : null;
+    const nowSpeed = Number.isFinite(Number(currentSpeed)) ? Number(currentSpeed) : null;
+    const nowPing = Number.isFinite(Number(currentPing)) ? Number(currentPing) : null;
+    return {
+        deltaSpeed: prevSpeed === null || nowSpeed === null ? null : Number((nowSpeed - prevSpeed).toFixed(2)),
+        deltaPing: prevPing === null || nowPing === null ? null : Number((nowPing - prevPing).toFixed(1))
+    };
+}
+
+function isNodeDownByHistory(ip) {
+    const key = String(ip || '').trim();
+    if (!key) return false;
+    const hist = Array.isArray(dbData.test_history[key]) ? dbData.test_history[key] : [];
+    if (hist.length < 2) return false;
+    const prev = Number(hist[hist.length - 2]?.speed);
+    const last = Number(hist[hist.length - 1]?.speed);
+    if (!Number.isFinite(prev) || !Number.isFinite(last)) return false;
+    return last < (prev - 3);
+}
+
 async function saveHistory(items) {
     const rows = Array.isArray(items) ? items : [];
     if (rows.length === 0) return;
@@ -671,6 +785,7 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
     const parseTimeoutMs = clamp(Number(runtimeOptions.parseTimeoutSec) || 25, 5, 120) * 1000;
     const totalTimeoutMs = clamp(Number(runtimeOptions.totalTimeoutSec) || 150, 20, 600) * 1000;
     const incremental = Boolean(runtimeOptions.incremental);
+    const incrementalDownOnly = Boolean(runtimeOptions.incrementalDownOnly);
     sendProgress(taskId, { state: 'start', phase: '准备中', message: '测速任务初始化中...' });
     logTask(taskId, 'start-request', {
         hasFile: Boolean(req.file),
@@ -774,9 +889,18 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
             const reused = finalIps.filter(ip => previous.has(ip)).slice(0, 20);
             finalIps = [...new Set([...newOnes, ...reused])];
         }
+        if (incrementalDownOnly) {
+            const downIps = finalIps.filter((ip) => isNodeDownByHistory(ip));
+            if (downIps.length > 0) {
+                finalIps = downIps;
+                sendProgress(taskId, { state: 'running', phase: '增量策略', message: `仅重测速度下降节点，命中 ${downIps.length} 个` });
+            } else {
+                sendProgress(taskId, { state: 'running', phase: '增量策略', message: '未发现下降节点，回退为常规增量测速' });
+            }
+        }
         dbData.last_targets = finalIps.slice(0, 500);
         await saveDb();
-        logTask(taskId, 'final-ips-ready', { finalCount: finalIps.length, incremental });
+        logTask(taskId, 'final-ips-ready', { finalCount: finalIps.length, incremental, incrementalDownOnly });
 
         inputIps = new Set(finalIps);
         args.push('-ip', finalIps.join(','));
@@ -816,6 +940,7 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
         try { child.kill('SIGKILL'); } catch {}
     }, totalTimeoutMs);
     let stdoutBuffer = '';
+    runningTasks.set(taskId, { child, watchdog, stoppedByUser: false });
 
     child.stdout.on('data', (chunk) => {
         stdoutBuffer += chunk.toString();
@@ -841,13 +966,20 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
     child.on('error', () => {
         logTask(taskId, 'child-error');
         clearTimeout(watchdog);
+        detachRunningTask(taskId);
         finishWithError(500, '底层引擎执行失败');
     });
 
     child.on('close', async (code, signal) => {
         logTask(taskId, 'child-close', { code, signal, timedOutKilled });
         clearTimeout(watchdog);
+        const task = runningTasks.get(taskId);
+        const stoppedByUser = Boolean(task && task.stoppedByUser);
+        detachRunningTask(taskId);
         if (replied) return;
+        if (stoppedByUser) {
+            return finishWithError(499, '任务已被手动停止', '用户中止');
+        }
         if (timedOutKilled) {
             return finishWithError(500, `测速超时已终止（>${Math.round(totalTimeoutMs / 1000)}秒），请降低并发/数量或调大“任务总超时”`, '执行超时');
         }
@@ -885,7 +1017,8 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
         const topResults = filtered.slice(0, cfstConfig.topN).map((item) => ({
             ...item,
             healthScore: computeHealthScore(item),
-            trend: computeTrend(item.ip, item.speed)
+            trend: computeTrend(item.ip, item.speed),
+            ...computeDelta(item.ip, item.ping, item.speed)
         }));
         logTask(taskId, 'results-ready', { rawResults: results.length, filtered: filtered.length, top: topResults.length });
         topResults.sort((a, b) => b.healthScore - a.healthScore);
@@ -941,6 +1074,7 @@ function listenWithAutoPort(appInstance, startPort, maxRetry) {
 
 (async () => {
     try {
+        ensureLocalRuntimeReady();
         await initDb();
         await migrateLegacySavedIpsIfNeeded();
         const { port } = await listenWithAutoPort(app, DEFAULT_PORT, MAX_PORT_RETRY);

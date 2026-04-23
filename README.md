@@ -56,7 +56,7 @@ bash install.sh
 
 ### 方式二：手动启动
 
-1. Node.js 版本要求：`>= 16`
+1. Node.js 版本要求：`>= 18`
 2. 将 `cfst` 放在项目根目录并赋权
 
 ```bash
@@ -67,6 +67,7 @@ chmod +x cfst
 
 ```bash
 npm install
+npm run build:min
 node server.js
 ```
 

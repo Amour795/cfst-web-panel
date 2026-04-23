@@ -16,7 +16,7 @@ NC='\033[0m'
 
 REPO_URL="https://github.com/Amour795/cfst-web-panel.git"
 PROJECT_DIR="cfst-web-panel"
-MIN_NODE_VERSION=16
+MIN_NODE_VERSION=18
 NODE_SETUP_MAJOR=18
 
 OS="$(uname -s)"
