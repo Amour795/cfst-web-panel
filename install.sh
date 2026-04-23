@@ -225,9 +225,77 @@ install_dependencies() {
 }
 
 update_code() {
+    local runtime_files=("database.json" "database.sqlite" "result.csv" "saved_ips.json")
+    local changed_non_runtime=0
+    local changed_runtime=0
+    local backup_dir=""
+
+    is_runtime_file() {
+        local file="$1"
+        for rf in "${runtime_files[@]}"; do
+            [ "$file" = "$rf" ] && return 0
+        done
+        return 1
+    }
+
+    detect_local_changes() {
+        local line file
+        while IFS= read -r line; do
+            [ -z "$line" ] && continue
+            file="${line:3}"
+            if [[ "$file" == *" -> "* ]]; then
+                file="${file##* -> }"
+            fi
+            if is_runtime_file "$file"; then
+                changed_runtime=1
+            else
+                changed_non_runtime=1
+            fi
+        done < <(git status --porcelain)
+    }
+
+    backup_runtime_changes() {
+        backup_dir=".install-runtime-backup.$(date +%s)"
+        mkdir -p "$backup_dir"
+        for rf in "${runtime_files[@]}"; do
+            [ -e "$rf" ] && cp -f "$rf" "$backup_dir/$rf"
+        done
+    }
+
+    restore_runtime_changes() {
+        [ -n "$backup_dir" ] || return 0
+        for rf in "${runtime_files[@]}"; do
+            [ -e "$backup_dir/$rf" ] && cp -f "$backup_dir/$rf" "$rf"
+        done
+        rm -rf "$backup_dir"
+    }
+
     info "拉取最新代码..."
     git fetch --all --prune
-    git pull --ff-only origin main
+    detect_local_changes
+
+    if [ "$changed_non_runtime" -eq 1 ]; then
+        warn "检测到非运行时文件有本地改动，已跳过代码更新（避免覆盖你的自定义修改）。"
+        warn "如需更新代码，请先手动提交或暂存本地改动后再执行。"
+        return 0
+    fi
+
+    if [ "$changed_runtime" -eq 1 ]; then
+        warn "检测到运行时数据有本地改动（database/result），将自动备份并继续更新。"
+        backup_runtime_changes
+        git checkout -- "${runtime_files[@]}" 2>/dev/null || true
+    fi
+
+    if [ "$changed_runtime" -eq 1 ]; then
+        if ! git pull --ff-only origin main; then
+            restore_runtime_changes
+            fail "代码更新失败，已自动恢复运行时数据文件。"
+            return 1
+        fi
+        restore_runtime_changes
+    else
+        git pull --ff-only origin main
+    fi
     ok "代码更新完成"
 }
 

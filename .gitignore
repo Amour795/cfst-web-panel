@@ -2,10 +2,6 @@ cfst
 ip.txt
 ipv6.txt
 result.csv
-database.sqlite
-database.sqlite-journal
-database.sqlite-shm
-database.sqlite-wal
 saved_ips.json
 node_modules/
 .DS_Store
@@ -14,3 +10,4 @@ yarn-debug.log*
 yarn-error.log*
 .env
 package-lock.json
+database.json
