@@ -776,8 +776,10 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
 
     const child = spawn('./cfst', args, { cwd: __dirname });
     logTask(taskId, 'spawn-cfst', { argsCount: args.length, totalTimeoutMs });
+    let timedOutKilled = false;
     const watchdog = setTimeout(() => {
         logTask(taskId, 'watchdog-timeout-kill', { totalTimeoutMs });
+        timedOutKilled = true;
         try { child.kill('SIGKILL'); } catch {}
     }, totalTimeoutMs);
     let stdoutBuffer = '';
@@ -809,11 +811,17 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
         finishWithError(500, '底层引擎执行失败');
     });
 
-    child.on('close', async (code) => {
-        logTask(taskId, 'child-close', { code });
+    child.on('close', async (code, signal) => {
+        logTask(taskId, 'child-close', { code, signal, timedOutKilled });
         clearTimeout(watchdog);
         if (replied) return;
-        if (code !== 0) return finishWithError(500, `底层引擎退出码异常: ${code}`);
+        if (timedOutKilled) {
+            return finishWithError(500, `测速超时已终止（>${Math.round(totalTimeoutMs / 1000)}秒），请降低并发/数量或调大“任务总超时”`, '执行超时');
+        }
+        if (code !== 0) {
+            const reason = signal ? `信号:${signal}` : `退出码:${code}`;
+            return finishWithError(500, `底层引擎异常退出（${reason}）`);
+        }
 
         const csvPath = path.join(__dirname, 'result.csv');
         if (!fs.existsSync(csvPath)) return finishWithError(500, '未找到结果文件', '结果解析');

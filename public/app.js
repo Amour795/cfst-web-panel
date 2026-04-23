@@ -623,6 +623,8 @@
                 if (selectedIps.length === 0) return showToast('❌ 请先选择要测速的 IP');
                 const taskId = `task_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
                 try {
+                    resetProgressUI();
+                    switchTab('test');
                     statusPanel.classList.remove('hidden');
                     statusTitle.innerText = '收藏测速';
                     statusSub.innerText = `正在测速 ${selectedIps.length} 个已收藏 IP...`;

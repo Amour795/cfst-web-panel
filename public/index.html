@@ -34,6 +34,9 @@
         .input-area { padding: 1.25rem; display: flex; flex-direction: column; gap: 0.75rem; }
         .input-header { display: flex; justify-content: space-between; align-items: center; }
         .input-header span { font-size: 0.85rem; font-weight: 600; color: #475569; }
+        .input-toggle-wrap { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; justify-content: flex-end; }
+        .input-toggle { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.75rem; color: #475569; font-weight: 700; line-height: 1; }
+        .input-toggle input { margin: 0; width: 1rem; height: 1rem; }
         .ip-stats { font-size: 0.75rem; color: #4f46e5; font-weight: bold; background: #eef2ff; padding: 0.2rem 0.6rem; border-radius: 999px; }
         .input-area textarea { width: 100%; border: 1px solid #cbd5e1; border-radius: 0.5rem; padding: 0.75rem; font-family: monospace; font-size: 0.875rem; outline: none; resize: none; min-height: 140px; white-space: pre; overflow-wrap: normal; overflow-x: auto; background: #f8fafc; transition: border-color 0.2s; line-height: 1.5; }
         .input-area textarea:focus { border-color: #4f46e5; background: #fff; box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1); }
@@ -81,6 +84,7 @@
         .action-btn:disabled { background-color: #94a3b8 !important; cursor: not-allowed; }
         .btn-copy { background-color: #10b981; } .btn-copy:hover { background-color: #059669; }
         .btn-save { background-color: #3b82f6; } .btn-save:hover { background-color: #2563eb; }
+        .btn-tag { background-color: #8b5cf6; } .btn-tag:hover { background-color: #7c3aed; }
         .btn-delete { background-color: #ef4444; } .btn-delete:hover { background-color: #dc2626; }
         
         .copyable-ip { cursor: pointer; display: flex; align-items: center; justify-content: space-between; padding: 0.2rem 0.4rem; border-radius: 0.375rem; transition: background 0.2s; }
@@ -115,6 +119,7 @@
         body.dark .input-area textarea { background: rgba(15, 23, 42, 0.6); border-color: rgba(148, 163, 184, 0.25); color: #e5e7eb; }
         body.dark .input-area textarea:focus { background: rgba(15, 23, 42, 0.75); }
         body.dark .setting-row label { color: #cbd5e1; }
+        body.dark .input-toggle { color: #cbd5e1; }
         body.dark .setting-row input, body.dark .setting-row select { background: rgba(15, 23, 42, 0.6); border-color: rgba(148, 163, 184, 0.25); color: #e5e7eb; }
         body.dark .setting-row input:focus, body.dark .setting-row select:focus { background: rgba(15, 23, 42, 0.75); }
         body.dark .setting-hint { color: #94a3b8; }
@@ -168,8 +173,8 @@
             <div class="glass-card input-area">
                 <div class="input-header">
                     <span>目标节点输入 (IP / 域名)</span>
-                    <div style="display:flex; align-items:center; gap:0.6rem; flex-wrap: wrap; justify-content:flex-end;">
-                        <label style="font-size:0.75rem; color:#475569; font-weight:700;">
+                    <div class="input-toggle-wrap">
+                        <label class="input-toggle">
                             <input id="allow-cname-input" type="checkbox"> CNAME 解析
                         </label>
                         <span class="ip-stats">已识别: <span id="ip-count">0</span></span>
@@ -345,7 +350,7 @@
                 <div class="action-btns">
                     <button id="copy-selected-btn" class="action-btn btn-copy" disabled>📋 复制</button>
                     <button id="save-selected-btn" class="action-btn btn-save" disabled>💾 收藏</button>
-                    <button id="tag-selected-btn" class="action-btn hidden" disabled>🏷️ 标签</button>
+                    <button id="tag-selected-btn" class="action-btn btn-tag hidden" disabled>🏷️ 标签</button>
                     <button id="delete-selected-btn" class="action-btn btn-delete hidden" disabled>🗑️ 删除</button>
                 </div>
             </div>
