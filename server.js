@@ -14,6 +14,7 @@ const app = express();
 const DEFAULT_PORT = Number(process.env.PORT) || 3088;
 const MAX_PORT_RETRY = 20;
 const MAX_TIMER_MS = 2147483647; // Node.js setTimeout 安全上限（约 24.8 天）
+const CFST_BIN_NAME = process.platform === 'win32' ? 'cfst.exe' : 'cfst';
 
 app.use(express.json());
 app.use(cors());
@@ -238,6 +239,7 @@ app.post('/api/system/update-engine', (req, res) => {
     else if (platform === 'darwin' && arch === 'x64') file = 'cfst_darwin_amd64.zip';
     else if (platform === 'linux' && (arch === 'arm64' || arch === 'aarch64')) file = 'cfst_linux_arm64.tar.gz';
     else if (platform === 'linux' && (arch === 'x64' || arch === 'amd64')) file = 'cfst_linux_amd64.tar.gz';
+    else if (platform === 'win32' && (arch === 'x64' || arch === 'amd64')) file = 'cfst_windows_amd64.zip';
     
     if (!file) return res.json({ success: false, msg: `暂不支持自动更新该架构: ${platform}-${arch}` });
     
@@ -250,7 +252,18 @@ app.post('/api/system/update-engine', (req, res) => {
     const curlOpts = '--connect-timeout 8 -sSfL';
     
     let cmd = '';
-    if (file.endsWith('.zip')) {
+    if (platform === 'win32') {
+        const ps = `$ErrorActionPreference='Stop';` +
+            `Set-Location -LiteralPath '${__dirname.replace(/'/g, "''")}';` +
+            `if (Test-Path '.\\cfst.exe') { Remove-Item -Force '.\\cfst.exe' };` +
+            `$u=@('${url1}','${url2}','${url3}');` +
+            `$ok=$false;` +
+            `foreach($x in $u){ try { Invoke-WebRequest -UseBasicParsing -Uri $x -OutFile '.\\tmp_cfst.zip' -TimeoutSec 20; $ok=$true; break } catch {} };` +
+            `if(-not $ok){ throw '下载失败' };` +
+            `Expand-Archive -Path '.\\tmp_cfst.zip' -DestinationPath '.' -Force;` +
+            `Remove-Item -Force '.\\tmp_cfst.zip'`;
+        cmd = `powershell -NoProfile -ExecutionPolicy Bypass -Command "${ps.replace(/"/g, '\\"')}"`;
+    } else if (file.endsWith('.zip')) {
         cmd = `rm -f cfst && (curl ${curlOpts} -o tmp_cfst.zip "${url1}" || curl ${curlOpts} -o tmp_cfst.zip "${url2}" || curl ${curlOpts} -o tmp_cfst.zip "${url3}") && unzip -o tmp_cfst.zip cfst && rm -f tmp_cfst.zip && chmod +x cfst`;
     } else {
         cmd = `rm -f cfst && (curl ${curlOpts} -o tmp_cfst.tar.gz "${url1}" || curl ${curlOpts} -o tmp_cfst.tar.gz "${url2}" || curl ${curlOpts} -o tmp_cfst.tar.gz "${url3}") && tar -zxf tmp_cfst.tar.gz cfst && rm -f tmp_cfst.tar.gz && chmod +x cfst`;
@@ -285,9 +298,11 @@ let dbSaveQueue = Promise.resolve();
 function ensureLocalRuntimeReady() {
     const major = Number(String(process.versions.node || '').split('.')[0] || 0);
     if (!Number.isFinite(major) || major < MIN_NODE_MAJOR) throw new Error(`Node.js 版本需 >= ${MIN_NODE_MAJOR}`);
-    const cfstPath = path.join(__dirname, 'cfst');
+    const cfstPath = path.join(__dirname, CFST_BIN_NAME);
     if (!fs.existsSync(cfstPath)) throw new Error('缺少 cfst 可执行文件');
-    try { fs.accessSync(cfstPath, fs.constants.X_OK); } catch { throw new Error('cfst 未设置可执行权限'); }
+    if (process.platform !== 'win32') {
+        try { fs.accessSync(cfstPath, fs.constants.X_OK); } catch { throw new Error('cfst 未设置可执行权限'); }
+    }
 }
 
 async function initDb() {
@@ -788,7 +803,7 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
         res.status(code).json({ success: !!data, msg, data });
     };
 
-    const child = spawn('./cfst', args, { cwd: __dirname });
+    const child = spawn(process.platform === 'win32' ? '.\\cfst.exe' : './cfst', args, { cwd: __dirname });
     const watchdog = setTimeout(() => { try { child.kill('SIGKILL'); } catch {} finish(500, '测速超时', '执行超时'); }, totalTimeoutMs);
     runningTasks.set(taskId, { child, watchdog });
 

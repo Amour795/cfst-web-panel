@@ -1,124 +1,150 @@
 # cfst-web-panel
 
-一个轻量、可自托管的 Cloudflare 节点测速面板。  
-后端调用 `cfst` 做延迟/下载测速，前端提供实时进度、收藏管理、标签和设置管理。
+一个面向本地场景的 Cloudflare 节点测速与 DNS 同步面板。  
+后端基于 `Node.js + Express` 调用 `cfst` 引擎测速，前端为单页静态页面，提供测速、收藏、DNS 管理与参数设置。
 
-当前文档与页面统一版本：`v1.0`  
 项目地址：<https://github.com/Amour795/cfst-web-panel>
 
-## 功能概览
+## 上游项目
 
-- 一键测速：执行 `./cfst`，解析 `result.csv` 后按速度返回结果
-- 目标输入：支持批量粘贴/CSV 导入，支持 `IP` 与 `CNAME` 两种输入模式
-- 实时进度：后端 `spawn` + SSE 推送，前端显示阶段（解析/Ping/下载）与百分比
-- 收藏管理：支持批量收藏、删除、测速选中、标签管理
-- 节点复制：收藏页支持按 `ip#地区|标签` 格式复制
-- 地区识别：优先使用 `csvColo`，缺失时调用 `cdn-cgi/trace` 补齐
-- 参数持久化：设置项持久化到 `database.json`
-- 深色模式：支持系统/手动切换
-- 纯静态前端：后端直接托管 `public/`，无需前端构建
+- `cfst`（CloudflareSpeedTest）原项目地址：<https://github.com/XIU2/CloudflareSpeedTest>
+- 本项目为 `cfst` 的本地 Web 面板封装，核心测速能力来自上游 `cfst` 引擎
 
-## 在线地址
+## 项目背景
 
-- 默认启动优先使用 `3088`，若端口占用会自动顺延到下一个可用端口
-- 本地启动后访问：以终端打印地址为准（通常 `http://localhost:3088`）
-- Termux 通常访问：以终端打印地址为准（通常 `http://127.0.0.1:3088`）
+这个项目用于解决以下常见痛点：
 
-## 快速开始
+- `cfst` 命令行参数多，日常调参和批量测速门槛较高
+- 需要把“测速结果”快速转化为“可用 DNS 解析记录”
+- 需要在本地环境持续使用、保留历史结果和收藏节点
+- 希望对测速任务有可视化进度、超时控制和中途停止能力
 
-### 方式一：一键脚本（推荐）
+因此本项目采用“本地单体服务 + 浏览器面板”的方式，强调易用性、稳定性与可维护性。
+
+## 核心功能
+
+- `测速大厅`：支持粘贴、CSV 导入、远程拉取源并提取目标 IP/域名
+- `输入模式`：支持 `IP` 模式与 `CNAME` 模式（域名自动解析 A/AAAA）
+- `实时进度`：SSE + 轮询双通道显示任务阶段、比例和消息
+- `引擎控制`：支持启动、超时终止、手动停止测速任务
+- `收藏管理`：收藏、删除、批量测速、标签管理、复制导出
+- `DNS 管理`：读取 Cloudflare 记录、单条删除、清空并批量同步优选 IP
+- `地区识别`：优先使用 `result.csv` 的 `colo`，不足时自动探测补齐
+- `设置持久化`：`cfst` 参数保存到 `database.json`，刷新后自动回显
+- `暗色模式`：支持系统跟随 / 浅色 / 深色手动切换
+- `系统维护`：可在面板触发测速引擎和官方 IP 段更新
+
+## 技术架构
+
+- 后端：`Express 4`、`multer`、原生 `fetch`、`child_process.spawn`
+- 前端：`public/index.html + public/app.js`（无框架）
+- 存储：`database.json`（收藏、设置、历史、最近目标）
+- 测速引擎：项目根目录 `./cfst` 可执行文件
+- 输出文件：`result.csv`（由 `cfst` 生成，后端解析后回传前端）
+
+## 环境要求
+
+- Node.js `>= 18`
+- 操作系统：`Linux / macOS / Windows / Termux(Android)`
+- 必备文件权限：项目目录可写（`database.json`、`result.csv`）
+- 可执行文件：
+- 非 Windows：`./cfst` 存在且具有执行权限
+- Windows：`.\cfst.exe` 存在
+
+## 安装与部署
+
+### 推荐一键安装（最优解）
+
+#### Linux / macOS / Termux
 
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Amour795/cfst-web-panel/main/install.sh)"
 ```
 
-也可以先克隆后执行：
+#### Windows（PowerShell）
 
-```bash
-git clone https://github.com/Amour795/cfst-web-panel.git
-cd cfst-web-panel
-bash install.sh
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/Amour795/cfst-web-panel/main/install.ps1 | iex"
 ```
 
-或在已克隆目录中直接执行：
+网络到 GitHub 不稳定时可用镜像源：
 
-```bash
-bash install.sh
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://mirror.ghproxy.com/https://raw.githubusercontent.com/Amour795/cfst-web-panel/main/install.ps1 | iex"
 ```
 
-脚本会自动处理：
+脚本会自动完成平台检测、依赖准备、代码获取、`cfst` 引擎下载、依赖安装与启动。  
+Windows 脚本在无 `git` 时会自动切换 ZIP 模式继续安装。
 
-- 环境检查（OS、架构、Node）
-- 基础依赖安装
-- 拉取最新代码
-- 下载匹配架构的 `cfst`
-- 安装依赖并启动服务
+### 启动访问
 
-### 方式二：手动启动
+- 默认端口：`3088`
+- 若 `3088` 被占用，服务会自动尝试 `3089`
+- 访问地址以终端打印为准（通常 `http://localhost:3088`）
 
-1. Node.js 版本要求：`>= 18`
-2. 将 `cfst` 放在项目根目录并赋权
+### 进程托管（可选）
 
-```bash
-chmod +x cfst
-```
-
-3. 安装并启动
+建议长期运行时使用 `pm2`：
 
 ```bash
-npm install
-npm run build:min
-node server.js
+npm install -g pm2
+pm2 start server.js --name cfst-web-panel
+pm2 save
 ```
 
-## 使用教程（建议第一次先看）
+## 使用说明
 
-### 1. 先准备目标
+### 1. 准备目标
 
-- 在测速大厅粘贴 IP，或点击 `导入 CSV 提取IP`
-- 支持填写“拉取源 URL”后点击 `拉取源`，自动抓取并提取目标（例如：`https://api.uouin.com/cloudflare.html`）
-- 默认为 IP 模式：会自动清理非 IP 内容
-- 勾选 `CNAME 解析` 后可保留域名并由后端解析
+- 在测速页粘贴 IP/域名，或导入 CSV
+- 可通过“拉取源 URL”获取外部文本并自动提取目标
+- `IP` 模式下会校验纯 IP，`CNAME` 模式允许域名参与解析
 
-### 2. 开始测速
+### 2. 执行测速
 
-- 点击底部 `开始测速`
-- 状态面板会显示阶段、`x/y` 文案和百分比
-- 结束后表格展示延迟、速度、地区、健康分、趋势
+- 点击“开始测速”创建任务
+- 进度面板显示“解析目标 -> Ping 测试 -> 下载测速 -> 结果解析”
+- 任务结束后按策略排序并返回 TopN
 
-### 3. 收藏与标签
+### 3. 收藏与复测
 
-- 在测速结果中勾选节点后点击 `💾 收藏`
-- 进入 `我的收藏` 可：
-  - `测速选中`（对收藏 IP 重新测速并回写）
-  - `🏷️ 标签`（批量设置/清空标签）
-  - `🗑️ 删除`（批量删除）
-  - `📋 复制`（格式：`ip#地区|标签`）
+- 勾选结果后可批量收藏
+- 收藏页支持批量复测、打标签、删除、复制导出
 
-### 4. 设置推荐
+### 4. DNS 同步
 
-- URL 预设：可直接选择官方/备用测速 URL
-- 常用参数建议（手机）：
-  - `n`: 48~80
-  - `t`: 2
-  - `dt`: 2~3
-  - `dn`: 3~5
-  - `TopN`: 15~20
-- `恢复官方推荐`：一键恢复推荐参数并保存
+- 先在设置页填写 `Zone ID / 子域名 / Token`
+- 在 DNS 页刷新记录，或将选中优选 IP 覆盖同步到 Cloudflare
 
-## API（核心）
+### 5. 主题切换
 
-- `POST /api/start-test`：启动测速
-- `GET /api/progress/:taskId`：SSE 进度流
-- `GET /api/progress-state/:taskId`：轮询进度兜底
-- `POST /api/regions`：批量补全地区
-- `GET /api/saved-ips`：读取收藏
-- `POST /api/save-ips`：新增/更新收藏（支持 `tag`）
-- `POST /api/delete-ips`：删除收藏
-- `GET /api/settings/cfst`：读取设置
-- `POST /api/settings/cfst`：保存设置
-- `POST /api/settings/cfst/reset`：恢复官方推荐
-- `POST /api/fetch-source`：拉取外部文本源并返回原始内容
+- 设置页 `外观` 可选：`跟随系统`、`浅色模式`、`黑夜模式`
+
+## 设置项与生效规则
+
+- `GET /api/settings/cfst` 读取当前配置，`POST /api/settings/cfst` 保存配置
+- 配置持久化到 `database.json -> settings.cfst_config`
+- 刷新页面后会重新请求后端并回显当前有效值
+- `disableDownload(-dd)`、`dnSingle`、`tl/tll/tlr/sl`、`allip`、`debug` 全部可保存
+- `解析超时(秒)`、`任务总超时(秒)`支持自由设置
+- 超时只受 Node 定时器技术上限影响（约 24.8 天）
+
+## 主要 API
+
+- `POST /api/start-test` 启动测速任务
+- `POST /api/stop-test` 手动停止任务
+- `GET /api/progress/:taskId` SSE 实时进度
+- `GET /api/progress-state/:taskId` 进度轮询兜底
+- `POST /api/fetch-source` 拉取远程目标源
+- `GET /api/saved-ips` 获取收藏
+- `POST /api/save-ips` 保存收藏
+- `POST /api/delete-ips` 删除收藏
+- `GET /api/settings/cf` 获取 CF 配置
+- `POST /api/settings/cf` 保存 CF 配置
+- `GET /api/cf/dns` 获取 DNS 记录
+- `POST /api/cf/dns/sync` 批量同步 DNS
+- `POST /api/system/update-engine` 更新 `cfst` 引擎
+- `POST /api/system/update-ips` 更新 Cloudflare 官方 IP 段
 
 ## 目录结构
 
@@ -130,37 +156,48 @@ node server.js
 │   └── min.js
 ├── server.js
 ├── install.sh
-├── database.json         # 运行时数据（收藏/设置）
-├── result.csv            # cfst 输出（运行时）
-├── cfst                  # 引擎二进制（运行时）
-└── saved_ips.json        # 旧版迁移源（可选）
+├── install.ps1
+├── package.json
+├── database.json      # 运行时持久化数据
+├── result.csv         # cfst 输出结果
+├── cfst               # 非 Windows 引擎可执行文件
+└── cfst.exe           # Windows 引擎可执行文件
 ```
 
-## 常见问题
+## 运维与排障
 
-### 1) `git pull` 提示本地文件会被覆盖
+### 服务启动失败
 
-- 常见于运行时文件（如 `database.json` / `result.csv`）被跟踪
-- 已建议加入 `.gitignore` 并从 Git 索引移除：
+- 检查 Node 版本是否 `>=18`
+- 检查 `cfst` 是否存在且可执行：`chmod +x cfst`
+- 检查目录写权限（`database.json`/`result.csv`）
 
-```bash
-git rm --cached database.json result.csv saved_ips.json database.sqlite 2>/dev/null || true
-git add .gitignore
-git commit -m "chore: ignore runtime data files"
-```
+### 设置保存后刷新不一致
 
-### 2) 安卓/Termux 偶发后台中断
+- 确认保存按钮提示成功
+- 升级后端后请重启 `node server.js`
+- 刷新页面后以接口回显值为准
 
-- 建议使用 `pm2` 托管并关闭系统电池优化
-- 前台调试可直接 `node server.js`
+### 任务过慢或易超时
 
-### 3) 进度文案与百分比不一致
+- 增大 `任务总超时(秒)` 与 `解析超时(秒)`
+- 减小并发参数（如 `n`、`dn`、`dt`）以换稳定
+- 目标数很大时建议分批测速
 
-- 新版以前端 `current/total` 作为优先百分比来源
-- 若后端异常退出，会显示更明确的超时/退出原因
+## 开发与构建
 
-## 注意事项
+- 开发启动：`node server.js`
+- 前端压缩：`npm run build:min`
+- 当前页面默认加载 `public/app.js`
+- `public/min.js` 作为压缩产物保留，便于发布与分发
 
-- 运行目录需有写权限（`database.json`、`result.csv`）
-- 端口默认从 `3088` 起，如遇占用会自动切换到可用端口
-- 本项目依赖 `cfst` 可执行文件，缺失会导致测速失败
+## 免责声明
+
+- 本项目仅用于网络质量测试、学习研究和运维自用，请遵守当地法律法规与服务条款
+- 用户应自行保管 Cloudflare API Token 等敏感信息，因泄露导致的风险由使用者承担
+- 任何基于本项目的测速、解析变更、流量调度行为，后果由操作人自行负责
+- 项目按“现状”提供，不对特定环境下的可用性、稳定性或适配性作担保
+
+## 许可协议
+
+默认遵循仓库中的许可证文件（如后续补充 `LICENSE`，以该文件为准）。
