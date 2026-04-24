@@ -335,17 +335,10 @@ function renderDnsStagingRows() {
         
         if (!confirm(`确定要删除此记录吗？\nIP: ${row.value || '空'} (${row.line})`)) return;
 
-        if (row.source === 'live') {
-            try {
-                const delRes = await fetch(`/api/cf/dns/${row.id}`, { method: 'DELETE' });
-                const delJson = await delRes.json();
-                if (!delJson.success) return showToast(`❌ 删除失败: ${delJson.msg || '未知错误'}`);
-            } catch (_) { return showToast('❌ 网络错误'); }
-            await loadDnsStaging();
-            return;
-        }
         dnsStagingRecords.splice(idx, 1);
-        await persistDnsStagingRecords();
+        if (row.source !== 'live') {
+            await persistDnsStagingRecords();
+        }
         renderDnsStagingRows();
     }));
 
@@ -383,7 +376,7 @@ async function syncToCloudflare(records) {
         const res = await fetch('/api/cf/dns/sync', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ records })
+            body: JSON.stringify({ records, replaceAll: false })
         });
         const json = await res.json();
         if (json.success) {
@@ -418,49 +411,49 @@ syncCfBtn?.addEventListener('click', () => {
 
 publishDnsBtn?.addEventListener('click', async () => {
     const originalRecords = await loadDnsStaging();
-    const liveRecordsToUpdate = dnsStagingRecords.filter(r => r.source === 'live');
-    const stagingRecordsToAdd = dnsStagingRecords.filter(r => r.source !== 'live');
-    
-    const updates = [];
-    for (const r of liveRecordsToUpdate) {
-        const original = originalRecords.find(o => o.id === r.id);
-        if (original && (original.value !== r.value || original.line !== r.line || original.ttl !== r.ttl)) {
-            updates.push(r);
-        }
-    }
+    const currentRecords = dnsStagingRecords.filter(r => r.value.trim() !== '');
 
-    if (!stagingRecordsToAdd.length && !updates.length) {
+    if (!currentRecords.length && !originalRecords.length) {
         return showToast('❌ 没有需要保存的变更');
     }
 
-    let msg = '确认保存以下更改到腾讯 DNS？\n';
-    if (stagingRecordsToAdd.length) msg += `- 新增 ${stagingRecordsToAdd.length} 条记录\n`;
-    if (updates.length) msg += `- 修改 ${updates.length} 条线上记录\n`;
-    
-    if (!confirm(msg)) return;
+    if (!confirm(`确认将当前列表的 ${currentRecords.length} 条记录全量覆盖到腾讯 DNS？\n(这将会删除线上不存在于当前列表的记录)`)) return;
 
-    if (updates.length > 0) {
-        for (const r of updates) {
+    const oldText = publishDnsBtn.innerText;
+    publishDnsBtn.innerText = '保存中...'; 
+    publishDnsBtn.disabled = true;
+
+    try {
+        const recordsToSync = currentRecords.map(r => ({
+            type: r.type,
+            line: r.line,
+            value: r.value,
+            ttl: r.ttl
+        }));
+
+        const res = await fetch('/api/cf/dns/sync', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ records: recordsToSync, replaceAll: true })
+        });
+        
+        const json = await res.json();
+        
+        if (json.success) {
+            showToast(`✅ 全量覆盖成功: 新增/更新 ${json.added || 0} 条，删除 ${json.deleted || 0} 条`);
             try {
-                await fetch(`/api/cf/dns/${r.id}/update`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ip: r.value, line: r.line, ttl: r.ttl })
-                });
+                await fetch('/api/dns/staging', { method: 'DELETE' });
             } catch (e) {}
+            await loadDnsStaging();
+        } else {
+            showToast(`❌ 同步失败: ${json.msg}`);
         }
+    } catch (e) {
+        showToast('❌ 网络错误');
+    } finally {
+        publishDnsBtn.innerText = oldText;
+        publishDnsBtn.disabled = false;
     }
-
-    if (stagingRecordsToAdd.length > 0) {
-        await syncToCloudflare(stagingRecordsToAdd.map(r => ({ type: r.type, line: r.line, value: r.value, ttl: r.ttl })));
-        try {
-            await fetch('/api/dns/staging', { method: 'DELETE' });
-        } catch (e) {}
-    } else {
-        showToast('✅ 线上记录已保存');
-    }
-    
-    await loadDnsStaging();
 });
 
 clearStagingBtn?.addEventListener('click', async () => {
