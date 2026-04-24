@@ -305,18 +305,20 @@ function renderDnsStagingRows() {
         dnsStagingRecords[idx].type = String(el.value || 'A').toUpperCase() === 'AAAA' ? 'AAAA' : 'A';
         if (dnsStagingRecords[idx].source !== 'live') await persistDnsStagingRecords();
     }));
-    document.querySelectorAll('.dns-stage-line').forEach(el => el.addEventListener('change', async () => {
-        const idx = Number(el.dataset.idx);
+    document.querySelectorAll('.dns-stage-line').forEach(el => el.addEventListener('change', async (e) => {
+        const selectEl = e.target;
+        const idx = Number(selectEl.dataset.idx);
         if (!Number.isFinite(idx) || !dnsStagingRecords[idx]) return;
         const row = dnsStagingRecords[idx];
-        row.line = normalizeLineKey(el.value);
+        row.line = normalizeLineKey(selectEl.value);
         if (row.source !== 'live') await persistDnsStagingRecords();
     }));
-    document.querySelectorAll('.dns-stage-ttl').forEach(el => el.addEventListener('change', async () => {
-        const idx = Number(el.dataset.idx);
+    document.querySelectorAll('.dns-stage-ttl').forEach(el => el.addEventListener('change', async (e) => {
+        const selectEl = e.target;
+        const idx = Number(selectEl.dataset.idx);
         if (!Number.isFinite(idx) || !dnsStagingRecords[idx]) return;
         const row = dnsStagingRecords[idx];
-        row.ttl = Number(el.value) === 60 ? 60 : 600;
+        row.ttl = Number(selectEl.value); 
         if (row.source !== 'live') await persistDnsStagingRecords();
     }));
     document.querySelectorAll('.dns-stage-value').forEach(el => el.addEventListener('change', async () => {
@@ -354,7 +356,7 @@ async function persistDnsStagingRecords() {
         type: r.type === 'AAAA' ? 'AAAA' : 'A',
         line: normalizeLineKey(r.line),
         value: String(r.value || '').trim(),
-        ttl: r.ttl === 60 ? 60 : 600
+        ttl: Number(r.ttl) || 600
     })).filter(r => r.value && r.source !== 'live');
     await fetch('/api/dns/staging', {
         method: 'PUT',
@@ -393,9 +395,9 @@ syncCfBtn?.addEventListener('click', () => {
     if(selectedIps.length === 0) return showToast('❌ 请先选择节点');
     if (!confirm(`将这 ${selectedIps.length} 个 IP 加入 DNS 记录列表？`)) return;
     const records = selectedIps.map(ip => ({
-        type: String(ip || '').includes(':') ? 'AAAA' : 'A',
+        type: ip.includes(':') ? 'AAAA' : 'A',
         line: 'default',
-        value: String(ip || '').trim(),
+        value: ip,
         ttl: 600
     }));
     fetch('/api/dns/staging', {
@@ -410,12 +412,7 @@ syncCfBtn?.addEventListener('click', () => {
 });
 
 publishDnsBtn?.addEventListener('click', async () => {
-    const originalRecords = await loadDnsStaging();
     const currentRecords = dnsStagingRecords.filter(r => r.value.trim() !== '');
-
-    if (!currentRecords.length && !originalRecords.length) {
-        return showToast('❌ 没有需要保存的变更');
-    }
 
     if (!confirm(`确认将当前列表的 ${currentRecords.length} 条记录全量覆盖到腾讯 DNS？\n(这将会删除线上不存在于当前列表的记录)`)) return;
 

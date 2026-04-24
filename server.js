@@ -497,7 +497,8 @@ async function requestDnsPod(action, params = {}) {
                 SubDomain: String(params.sub_domain || '@'),
                 RecordType: String(params.record_type || 'A'),
                 RecordLine: String(params.record_line || '默认'),
-                Value: String(params.value || '')
+                Value: String(params.value || ''),
+                TTL: Number(params.ttl || 600)
             };
         } else if (tcAction === 'DeleteRecord') {
             payload = {
@@ -511,7 +512,8 @@ async function requestDnsPod(action, params = {}) {
                 SubDomain: String(params.sub_domain || '@'),
                 RecordType: String(params.record_type || 'A'),
                 RecordLine: String(params.record_line || '默认'),
-                Value: String(params.value || '')
+                Value: String(params.value || ''),
+                TTL: Number(params.ttl || 600)
             };
         }
 
@@ -550,7 +552,7 @@ async function requestDnsPod(action, params = {}) {
             const list = Array.isArray(data?.Response?.RecordList) ? data.Response.RecordList : [];
             return {
                 status: { code: '1' },
-                records: list.map(r => ({ id: r.RecordId, value: r.Value, type: r.Type, line: r.Line }))
+                records: list.map(r => ({ id: r.RecordId, value: r.Value, type: r.Type, line: r.Line, ttl: r.TTL }))
             };
         }
         return { status: { code: '1' } };
@@ -646,7 +648,8 @@ app.get('/api/cf/dns', async (req, res) => {
                 id: r.id,
                 content: r.value,
                 type: r.type,
-                line: r.line
+                line: r.line,
+                ttl: r.ttl
             }));
         res.json({ success: true, data: records });
     } catch (e) { res.status(500).json({ success: false, msg: `腾讯 DNS 请求失败: ${e.message}` }); }
@@ -714,7 +717,7 @@ app.post('/api/cf/dns/:id/update', async (req, res) => {
 
 app.post('/api/cf/dns/sync', async (req, res) => {
     try {
-        const { ips, line, records } = req.body || {};
+        const { ips, line, records, replaceAll } = req.body || {};
         const cfg = await getDnsApiConfig();
         if (!cfg?.domain || !cfg?.token) return res.json({ success: false, msg: '未配置腾讯 DNS 信息' });
         const target = await resolveDnsTarget(cfg);
@@ -727,9 +730,9 @@ app.post('/api/cf/dns/sync', async (req, res) => {
         if (!isDnsPodSuccess(curr)) {
             return res.json({ success: false, msg: curr?.status?.message || '读取现有记录失败' });
         }
-        const existing = new Set((curr.records || [])
-            .filter(r => r.type === 'A' || r.type === 'AAAA')
-            .map(r => `${String(r.value || '').trim()}|${String(r.type || 'A')}|${lineLabelToKey(r.line)}`));
+        
+        const existingRecords = (curr.records || []).filter(r => r.type === 'A' || r.type === 'AAAA');
+        const existing = new Set(existingRecords.map(r => `${String(r.value || '').trim()}|${String(r.type || 'A')}|${lineLabelToKey(r.line)}`));
 
         let added = 0;
         let skipped = 0;
@@ -739,143 +742,208 @@ app.post('/api/cf/dns/sync', async (req, res) => {
                 const value = String(item?.value || item?.ip || '').trim();
                 const type = String(item?.type || (value.includes(':') ? 'AAAA' : 'A')).toUpperCase() === 'AAAA' ? 'AAAA' : 'A';
                 const lineKey = normalizeDnsLine(item?.line || baseLine);
-                return { value, type, lineKey };
+                return { value, type, lineKey, ttl: Number(item?.ttl) || 600 };
             }).filter(r => r.value)
             : (Array.isArray(ips) ? ips.map(ip => {
                 const value = String(ip || '').trim();
                 const type = value.includes(':') ? 'AAAA' : 'A';
-                return { value, type, lineKey: baseLine };
+                return { value, type, lineKey: baseLine, ttl: 600 };
             }).filter(r => r.value) : []);
 
-        for (const rec of normalizedRecords) {
-            const value = rec.value;
-            const type = rec.type;
-            const lineKey = rec.lineKey;
-            const key = `${value}|${type}|${lineKey}`;
-            if (existing.has(key)) {
-                skipped++;
-                continue;
+        let deleted = 0;
+
+        if (replaceAll) {
+            // 先处理更新和新增
+            for (const rec of normalizedRecords) {
+                const { value, type, lineKey, ttl } = rec;
+                const existingMatch = existingRecords.find(er => 
+                    er.value === value && 
+                    er.type === type && 
+                    lineLabelToKey(er.line) === lineKey
+                );
+                
+                if (existingMatch) {
+                    if (Number(existingMatch.ttl) !== Number(ttl)) {
+                        try {
+                            await requestDnsPod('Record.Modify', {
+                                domain: target.domain,
+                                record_id: existingMatch.id,
+                                sub_domain: target.subDomain,
+                                record_type: type,
+                                record_line: DNSPOD_LINE_MAP[lineKey],
+                                value,
+                                ttl
+                            });
+                            added++; // 算作更新成功
+                        } catch(e) {}
+                    } else {
+                        skipped++;
+                    }
+                } else {
+                    try {
+                        const addRes = await requestDnsPod('Record.Create', {
+                            domain: target.domain,
+                            sub_domain: target.subDomain,
+                            record_type: type,
+                            record_line: DNSPOD_LINE_MAP[lineKey],
+                            value,
+                            ttl
+                        });
+                        if (isDnsPodSuccess(addRes)) added++;
+                    } catch(e) {}
+                }
             }
-            const addRes = await requestDnsPod('Record.Create', {
-                domain: target.domain,
-                sub_domain: target.subDomain,
-                record_type: type,
-                record_line: DNSPOD_LINE_MAP[lineKey],
-                value,
-                ttl: 600
-            });
-            if (isDnsPodSuccess(addRes)) {
-                added++;
-                existing.add(key);
+
+            // 处理删除：线上存在，但不在当前提交列表中的记录
+            for (const er of existingRecords) {
+                const erLineKey = lineLabelToKey(er.line);
+                const stillExists = normalizedRecords.find(r => 
+                    r.value === er.value && 
+                    r.type === er.type && 
+                    r.lineKey === erLineKey
+                );
+                
+                if (!stillExists) {
+                    try {
+                        const delRes = await requestDnsPod('Record.Remove', {
+                            domain: target.domain,
+                            record_id: er.id
+                        });
+                        if (isDnsPodSuccess(delRes)) deleted++;
+                    } catch(e) {}
+                }
+            }
+        } else {
+            // 原有的追加逻辑
+            for (const rec of normalizedRecords) {
+                const { value, type, lineKey, ttl } = rec;
+                const key = `${value}|${type}|${lineKey}`;
+                if (existing.has(key)) {
+                    skipped++;
+                    continue;
+                }
+                const addRes = await requestDnsPod('Record.Create', {
+                    domain: target.domain,
+                    sub_domain: target.subDomain,
+                    record_type: type,
+                    record_line: DNSPOD_LINE_MAP[lineKey],
+                    value,
+                    ttl
+                });
+                if (isDnsPodSuccess(addRes)) {
+                    added++;
+                    existing.add(key);
+                }
             }
         }
-        res.json({ success: true, added, skipped });
+        
+        res.json({ success: true, added, skipped, deleted });
     } catch (e) { res.status(500).json({ success: false, msg: `同步解析失败: ${e.message}` }); }
 });
 
 // --- DNS 候选 IP 暂存（由测速/收藏页提交，DNS 页手动发布） ---
-app.get('/api/dns/staging', async (req, res) => {
-    try {
-        const raw = await getSetting('dns_staging');
-        let records = [];
-        if (raw) {
-            const parsed = JSON.parse(raw);
-            if (Array.isArray(parsed)) {
-                if (parsed.length && typeof parsed[0] === 'string') {
-                    records = parsed.map(v => {
-                        const value = String(v || '').trim();
-                        return { type: value.includes(':') ? 'AAAA' : 'A', line: 'default', value };
-                    }).filter(r => r.value);
-                } else {
-                    records = parsed.map(item => {
-                        const value = String(item?.value || item?.ip || '').trim();
-                        const type = String(item?.type || (value.includes(':') ? 'AAAA' : 'A')).toUpperCase() === 'AAAA' ? 'AAAA' : 'A';
-                        const line = normalizeDnsLine(item?.line);
-                        return { type, line, value };
-                    }).filter(r => r.value);
+    app.get('/api/dns/staging', async (req, res) => {
+        try {
+            const raw = await getSetting('dns_staging');
+            let records = [];
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed)) {
+                    if (parsed.length && typeof parsed[0] === 'string') {
+                        records = parsed.map(v => {
+                            const value = String(v || '').trim();
+                            return { type: value.includes(':') ? 'AAAA' : 'A', line: 'default', value, ttl: 600 };
+                        }).filter(r => r.value);
+                    } else {
+                        records = parsed.map(item => {
+                            const value = String(item?.value || item?.ip || '').trim();
+                            const type = String(item?.type || (value.includes(':') ? 'AAAA' : 'A')).toUpperCase() === 'AAAA' ? 'AAAA' : 'A';
+                            const line = normalizeDnsLine(item?.line);
+                            return { type, line, value, ttl: Number(item?.ttl) || 600 };
+                        }).filter(r => r.value);
+                    }
                 }
             }
+            const uniq = [];
+            const seen = new Set();
+            for (const r of records) {
+                const k = `${r.type}|${r.line}|${r.value}`;
+                if (seen.has(k)) continue;
+                seen.add(k);
+                uniq.push(r);
+            }
+            res.json({ success: true, data: uniq });
+        } catch (e) {
+            res.json({ success: false, msg: '读取候选记录失败' });
         }
-        const uniq = [];
-        const seen = new Set();
-        for (const r of records) {
-            const k = `${r.type}|${r.line}|${r.value}`;
-            if (seen.has(k)) continue;
-            seen.add(k);
-            uniq.push(r);
-        }
-        res.json({ success: true, data: uniq });
-    } catch (e) {
-        res.json({ success: false, msg: '读取候选记录失败' });
-    }
-});
+    });
 
-app.post('/api/dns/staging', async (req, res) => {
-    try {
-        const incomingRecords = Array.isArray(req.body?.records) ? req.body.records : [];
-        const incomingIps = Array.isArray(req.body?.ips) ? req.body.ips : [];
-        const normalized = [];
-        for (const item of incomingRecords) {
-            const value = String(item?.value || item?.ip || '').trim();
-            if (!value) continue;
-            const type = String(item?.type || (value.includes(':') ? 'AAAA' : 'A')).toUpperCase() === 'AAAA' ? 'AAAA' : 'A';
-            const line = normalizeDnsLine(item?.line);
-            normalized.push({ type, line, value });
+    app.post('/api/dns/staging', async (req, res) => {
+        try {
+            const incomingRecords = Array.isArray(req.body?.records) ? req.body.records : [];
+            const incomingIps = Array.isArray(req.body?.ips) ? req.body.ips : [];
+            const normalized = [];
+            for (const item of incomingRecords) {
+                const value = String(item?.value || item?.ip || '').trim();
+                if (!value) continue;
+                const type = String(item?.type || (value.includes(':') ? 'AAAA' : 'A')).toUpperCase() === 'AAAA' ? 'AAAA' : 'A';
+                const line = normalizeDnsLine(item?.line);
+                normalized.push({ type, line, value, ttl: Number(item?.ttl) || 600 });
+            }
+            for (const ip of incomingIps) {
+                const value = String(ip || '').trim();
+                if (!value) continue;
+                normalized.push({ type: value.includes(':') ? 'AAAA' : 'A', line: normalizeDnsLine(req.body?.line), value, ttl: 600 });
+            }
+            if (!normalized.length) return res.json({ success: false, msg: '没有可暂存的记录' });
+    
+            const oldRaw = await getSetting('dns_staging');
+            let old = [];
+            if (oldRaw) {
+                try {
+                    const parsed = JSON.parse(oldRaw);
+                    if (Array.isArray(parsed)) {
+                        old = parsed.map(item => {
+                            const value = String(item?.value || item?.ip || item || '').trim();
+                            if (!value) return null;
+                            const type = String(item?.type || (value.includes(':') ? 'AAAA' : 'A')).toUpperCase() === 'AAAA' ? 'AAAA' : 'A';
+                            const line = normalizeDnsLine(item?.line);
+                            return { type, line, value, ttl: Number(item?.ttl) || 600 };
+                        }).filter(Boolean);
+                    }
+                } catch (_) {}
+            }
+            const merged = [];
+            const seen = new Set();
+            for (const r of [...old, ...normalized]) {
+                const k = `${r.type}|${r.line}|${r.value}`;
+                if (seen.has(k)) continue;
+                seen.add(k);
+                merged.push(r);
+            }
+            await setSetting('dns_staging', JSON.stringify(merged));
+            res.json({ success: true, data: merged, added: normalized.length, total: merged.length });
+        } catch (e) {
+            res.json({ success: false, msg: '暂存失败' });
         }
-        for (const ip of incomingIps) {
-            const value = String(ip || '').trim();
-            if (!value) continue;
-            normalized.push({ type: value.includes(':') ? 'AAAA' : 'A', line: normalizeDnsLine(req.body?.line), value });
-        }
-        if (!normalized.length) return res.json({ success: false, msg: '没有可暂存的记录' });
+    });
 
-        const oldRaw = await getSetting('dns_staging');
-        let old = [];
-        if (oldRaw) {
-            try {
-                const parsed = JSON.parse(oldRaw);
-                if (Array.isArray(parsed)) {
-                    old = parsed.map(item => {
-                        const value = String(item?.value || item?.ip || item || '').trim();
-                        if (!value) return null;
-                        const type = String(item?.type || (value.includes(':') ? 'AAAA' : 'A')).toUpperCase() === 'AAAA' ? 'AAAA' : 'A';
-                        const line = normalizeDnsLine(item?.line);
-                        return { type, line, value };
-                    }).filter(Boolean);
-                }
-            } catch (_) {}
+    app.put('/api/dns/staging', async (req, res) => {
+        try {
+            const incoming = Array.isArray(req.body?.records) ? req.body.records : [];
+            const normalized = incoming.map(item => {
+                const value = String(item?.value || item?.ip || '').trim();
+                if (!value) return null;
+                const type = String(item?.type || (value.includes(':') ? 'AAAA' : 'A')).toUpperCase() === 'AAAA' ? 'AAAA' : 'A';
+                const line = normalizeDnsLine(item?.line);
+                return { type, line, value, ttl: Number(item?.ttl) || 600 };
+            }).filter(Boolean);
+            await setSetting('dns_staging', JSON.stringify(normalized));
+            res.json({ success: true, data: normalized });
+        } catch (e) {
+            res.json({ success: false, msg: '保存候选记录失败' });
         }
-        const merged = [];
-        const seen = new Set();
-        for (const r of [...old, ...normalized]) {
-            const k = `${r.type}|${r.line}|${r.value}`;
-            if (seen.has(k)) continue;
-            seen.add(k);
-            merged.push(r);
-        }
-        await setSetting('dns_staging', JSON.stringify(merged));
-        res.json({ success: true, data: merged, added: normalized.length, total: merged.length });
-    } catch (e) {
-        res.json({ success: false, msg: '暂存失败' });
-    }
-});
-
-app.put('/api/dns/staging', async (req, res) => {
-    try {
-        const incoming = Array.isArray(req.body?.records) ? req.body.records : [];
-        const normalized = incoming.map(item => {
-            const value = String(item?.value || item?.ip || '').trim();
-            if (!value) return null;
-            const type = String(item?.type || (value.includes(':') ? 'AAAA' : 'A')).toUpperCase() === 'AAAA' ? 'AAAA' : 'A';
-            const line = normalizeDnsLine(item?.line);
-            return { type, line, value };
-        }).filter(Boolean);
-        await setSetting('dns_staging', JSON.stringify(normalized));
-        res.json({ success: true, data: normalized });
-    } catch (e) {
-        res.json({ success: false, msg: '保存候选记录失败' });
-    }
-});
+    });
 
 app.delete('/api/dns/staging', async (req, res) => {
     try {
