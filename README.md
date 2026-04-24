@@ -7,7 +7,7 @@
 
 ## 界面预览
 
-![CFST Web Panel 界面预览](./docs/ui-preview.svg)
+![CFST Web Panel 界面预览](./docs/ui-preview.png)
 
 ## 上游项目
 
