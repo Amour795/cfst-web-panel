@@ -333,94 +333,557 @@ async function saveDb() {
 async function getSetting(key) { return dbData.settings[key] || null; }
 async function setSetting(key, value) { dbData.settings[key] = value; await saveDb(); }
 
-// --- CF API 与 DNS 设置 ---
-async function requestCF(path, method, body) {
-    const raw = await getSetting('cf_api');
-    if (!raw) throw new Error('未配置 CF 信息');
-    const { token, email } = JSON.parse(raw);
-    const headers = { 'Content-Type': 'application/json' };
-    if (email) {
-        headers['X-Auth-Email'] = email;
-        headers['X-Auth-Key'] = token;
-    } else {
-        headers['Authorization'] = `Bearer ${token}`;
+// --- 腾讯 DNSPod 设置 ---
+const DNSPOD_LINE_MAP = {
+    default: '默认',
+    telecom: '电信',
+    unicom: '联通',
+    mobile: '移动'
+};
+
+function normalizeDnsLine(line) {
+    const v = String(line || '').trim().toLowerCase();
+    return Object.prototype.hasOwnProperty.call(DNSPOD_LINE_MAP, v) ? v : 'default';
+}
+
+function lineLabelToKey(lineLabel) {
+    const label = String(lineLabel || '').trim();
+    if (label === '电信') return 'telecom';
+    if (label === '联通') return 'unicom';
+    if (label === '移动') return 'mobile';
+    return 'default';
+}
+
+function normalizeDnsToken(token) {
+    // 兼容中文逗号和空格: 12345，abcdef -> 12345,abcdef
+    return String(token || '').trim().replace(/，/g, ',').replace(/\s+/g, '');
+}
+
+function composeDnsToken(tokenId, tokenKey, rawToken) {
+    const raw = normalizeDnsToken(rawToken);
+    if (raw.includes(',')) return raw;
+    const idRaw = normalizeDnsToken(tokenId);
+    if (idRaw.includes(',')) return idRaw;
+    const key = normalizeDnsToken(tokenKey);
+    if (key.includes(',')) return key;
+    const id = idRaw;
+    if (id && key) return normalizeDnsToken(`${id},${key}`);
+    return raw || key || id;
+}
+
+function isTencentCloudSecretCredential(cfg) {
+    return String(cfg?.tokenId || '').startsWith('AKID') && String(cfg?.tokenKey || '').length >= 16;
+}
+
+function tc3Sign(secretKey, date, service, strToSign) {
+    const secretDate = crypto.createHmac('sha256', `TC3${secretKey}`).update(date).digest();
+    const secretService = crypto.createHmac('sha256', secretDate).update(service).digest();
+    const secretSigning = crypto.createHmac('sha256', secretService).update('tc3_request').digest();
+    return crypto.createHmac('sha256', secretSigning).update(strToSign).digest('hex');
+}
+
+function parseDnsTarget(fullDomain) {
+    const value = String(fullDomain || '').trim().replace(/\.+$/, '').toLowerCase();
+    if (!value) return null;
+    const parts = value.split('.').filter(Boolean);
+    if (parts.length < 2) return null;
+    return {
+        domain: parts.slice(-2).join('.'),
+        subDomain: parts.slice(0, -2).join('.') || '@',
+        fullDomain: value
+    };
+}
+
+async function resolveDnsTargetSmart(fullDomain) {
+    const value = String(fullDomain || '').trim().replace(/\.+$/, '').toLowerCase();
+    const parts = value.split('.').filter(Boolean);
+    if (parts.length < 2) throw new Error('域名格式无效，请输入完整子域名');
+
+    // 从 i=0 开始，支持直接填写根域（如 sikt.club => domain=sikt.club, sub=@）
+    // 同时兼容多级后缀（如 a.b.example.com.cn）。
+    for (let i = 0; i <= parts.length - 2; i++) {
+        const domain = parts.slice(i).join('.');
+        if (domain.split('.').length < 2) continue;
+        const subDomain = parts.slice(0, i).join('.') || '@';
+        try {
+            const list = await requestDnsPod('Record.List', {
+                domain,
+                sub_domain: subDomain,
+                length: 1
+            });
+            if (isDnsPodSuccess(list)) return { domain, subDomain, fullDomain: value };
+        } catch (_) {}
     }
-    const res = await fetch(`https://api.cloudflare.com/client/v4${path}`, {
-        method, headers, body: body ? JSON.stringify(body) : undefined
+    throw new Error('无法识别主域名：请确认完整子域名填写正确，且 Token 对该主域有读写权限');
+}
+
+async function getDnsApiConfig() {
+    const raw = await getSetting('dns_api');
+    if (raw) {
+        const parsed = JSON.parse(raw);
+        const tokenId = String(parsed.tokenId || '').trim();
+        const tokenKey = String(parsed.tokenKey || '').trim();
+        const mergedToken = composeDnsToken(tokenId, tokenKey, parsed.token);
+        let tcId = tokenId;
+        let tcKey = tokenKey;
+        if ((!tcId || !tcKey) && mergedToken.includes(',')) {
+            const [a, b] = mergedToken.split(',');
+            if (String(a || '').startsWith('AKID') && b) {
+                tcId = tcId || String(a).trim();
+                tcKey = tcKey || String(b).trim();
+            }
+        }
+        return {
+            provider: 'dnspod',
+            domain: String(parsed.domain || '').trim(),
+            tokenId: tcId,
+            tokenKey: tcKey,
+            token: mergedToken,
+            line: normalizeDnsLine(parsed.line)
+        };
+    }
+    const legacyRaw = await getSetting('cf_api');
+    if (!legacyRaw) return null;
+    const legacy = JSON.parse(legacyRaw);
+    return {
+        provider: 'dnspod',
+        domain: String(legacy.domain || '').trim(),
+        tokenId: '',
+        tokenKey: '',
+        token: normalizeDnsToken(legacy.token),
+        line: 'default'
+    };
+}
+
+async function resolveDnsTarget(cfg) {
+    const value = String(cfg?.domain || '').trim().replace(/\.+$/, '').toLowerCase();
+    const parts = value.split('.').filter(Boolean);
+    if (parts.length < 2) throw new Error('域名格式无效，请输入完整子域名');
+
+    // 常见中国二级后缀，避免把 example.com.cn 错判为 com.cn
+    const cn2ld = new Set(['com.cn', 'net.cn', 'org.cn', 'gov.cn', 'edu.cn', 'ac.cn']);
+    const tail2 = parts.slice(-2).join('.');
+    const useLast3 = cn2ld.has(tail2) && parts.length >= 3;
+    const domain = useLast3 ? parts.slice(-3).join('.') : parts.slice(-2).join('.');
+    const subDomain = useLast3 ? (parts.slice(0, -3).join('.') || '@') : (parts.slice(0, -2).join('.') || '@');
+    return { domain, subDomain, fullDomain: value };
+}
+
+async function requestDnsPod(action, params = {}) {
+    const cfg = await getDnsApiConfig();
+    if (isTencentCloudSecretCredential(cfg)) {
+        const host = 'dnspod.tencentcloudapi.com';
+        const service = 'dnspod';
+        const version = '2021-03-23';
+        const actionMap = {
+            'Record.List': 'DescribeRecordList',
+            'Record.Create': 'CreateRecord',
+            'Record.Remove': 'DeleteRecord',
+            'Record.Modify': 'ModifyRecord'
+        };
+        const tcAction = actionMap[action];
+        if (!tcAction) throw new Error(`不支持的 DNS 动作: ${action}`);
+
+        let payload = {};
+        if (tcAction === 'DescribeRecordList') {
+            payload = {
+                Domain: String(params.domain || ''),
+                Subdomain: String(params.sub_domain || '@'),
+                Limit: Math.min(3000, Math.max(1, Number(params.length) || 100))
+            };
+        } else if (tcAction === 'CreateRecord') {
+            payload = {
+                Domain: String(params.domain || ''),
+                SubDomain: String(params.sub_domain || '@'),
+                RecordType: String(params.record_type || 'A'),
+                RecordLine: String(params.record_line || '默认'),
+                Value: String(params.value || '')
+            };
+        } else if (tcAction === 'DeleteRecord') {
+            payload = {
+                Domain: String(params.domain || ''),
+                RecordId: Number(params.record_id)
+            };
+        } else if (tcAction === 'ModifyRecord') {
+            payload = {
+                Domain: String(params.domain || ''),
+                RecordId: Number(params.record_id),
+                SubDomain: String(params.sub_domain || '@'),
+                RecordType: String(params.record_type || 'A'),
+                RecordLine: String(params.record_line || '默认'),
+                Value: String(params.value || '')
+            };
+        }
+
+        const timestamp = Math.floor(Date.now() / 1000);
+        const date = new Date(timestamp * 1000).toISOString().slice(0, 10);
+        const requestPayload = JSON.stringify(payload);
+        const hashedRequestPayload = crypto.createHash('sha256').update(requestPayload).digest('hex');
+        const canonicalHeaders = `content-type:application/json; charset=utf-8\nhost:${host}\nx-tc-action:${tcAction.toLowerCase()}\n`;
+        const signedHeaders = 'content-type;host;x-tc-action';
+        const canonicalRequest = `POST\n/\n\n${canonicalHeaders}\n${signedHeaders}\n${hashedRequestPayload}`;
+        const hashedCanonicalRequest = crypto.createHash('sha256').update(canonicalRequest).digest('hex');
+        const credentialScope = `${date}/${service}/tc3_request`;
+        const strToSign = `TC3-HMAC-SHA256\n${timestamp}\n${credentialScope}\n${hashedCanonicalRequest}`;
+        const signature = tc3Sign(cfg.tokenKey, date, service, strToSign);
+        const authorization = `TC3-HMAC-SHA256 Credential=${cfg.tokenId}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+        const res = await fetch(`https://${host}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json; charset=utf-8',
+                Host: host,
+                Authorization: authorization,
+                'X-TC-Action': tcAction,
+                'X-TC-Version': version,
+                'X-TC-Timestamp': String(timestamp)
+            },
+            body: requestPayload
+        });
+        const text = await res.text();
+        if (!res.ok) throw new Error(`腾讯云 DNS HTTP ${res.status}`);
+        let data = null;
+        try { data = JSON.parse(text); } catch (_) { throw new Error('腾讯云 DNS 返回非 JSON 数据'); }
+        if (data?.Response?.Error) throw new Error(data.Response.Error.Message || data.Response.Error.Code || '腾讯云 DNS 请求失败');
+
+        if (tcAction === 'DescribeRecordList') {
+            const list = Array.isArray(data?.Response?.RecordList) ? data.Response.RecordList : [];
+            return {
+                status: { code: '1' },
+                records: list.map(r => ({ id: r.RecordId, value: r.Value, type: r.Type, line: r.Line }))
+            };
+        }
+        return { status: { code: '1' } };
+    }
+
+    if (!cfg?.token) throw new Error('未配置腾讯 DNS Token');
+    const body = new URLSearchParams({
+        login_token: cfg.token,
+        format: 'json',
+        lang: 'cn',
+        error_on_empty: 'no'
     });
-    return await res.json();
+    for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== null) body.set(key, String(value));
+    }
+    const res = await fetch(`https://dnsapi.cn/${action}`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'User-Agent': 'cfst-web-panel/1.0'
+        },
+        body
+    });
+    const text = await res.text();
+    if (!res.ok) {
+        if (res.status === 401) throw new Error('DNSPod HTTP 401（Token 无效或格式错误，请检查 Token ID/Token）');
+        throw new Error(`DNSPod HTTP ${res.status}`);
+    }
+    let data = null;
+    try {
+        data = JSON.parse(text);
+    } catch (_) {
+        throw new Error('DNSPod 返回非 JSON 数据');
+    }
+    return data;
+}
+
+function isDnsPodSuccess(data) {
+    return String(data?.status?.code || '') === '1';
 }
 
 app.get('/api/settings/cf', async (req, res) => {
     try {
-        const raw = await getSetting('cf_api');
-        res.json({ success: true, data: raw ? JSON.parse(raw) : {} });
+        const cfg = await getDnsApiConfig();
+        res.json({ success: true, data: cfg || {} });
     } catch (e) { res.json({ success: false }); }
 });
 
 app.post('/api/settings/cf', async (req, res) => {
-    try { await setSetting('cf_api', JSON.stringify(req.body)); res.json({ success: true }); } 
+    try {
+        const old = await getDnsApiConfig();
+        const tokenId = String(req.body?.tokenId || '').trim();
+        const tokenKey = String(req.body?.tokenKey || '').trim();
+        const mergedToken = composeDnsToken(tokenId, tokenKey, req.body?.token);
+        const payload = {
+            provider: 'dnspod',
+            domain: String(req.body?.domain || '').trim(),
+            tokenId,
+            tokenKey,
+            token: mergedToken,
+            line: normalizeDnsLine(req.body?.line || old?.line || 'default')
+        };
+        await setSetting('dns_api', JSON.stringify(payload));
+        res.json({ success: true, data: payload });
+    }
     catch (e) { res.json({ success: false }); }
 });
 
 app.get('/api/cf/dns', async (req, res) => {
     try {
-        const raw = await getSetting('cf_api');
-        const { zoneId, domain } = raw ? JSON.parse(raw) : {};
-        if (!zoneId || !domain) return res.json({ success: false, msg: '未配置 Zone ID 或域名' });
-        
-        const data = await requestCF(`/zones/${zoneId}/dns_records?type=A&name=${domain}`, 'GET');
-        res.json({ success: data.success, data: data.result, msg: data.errors?.[0]?.message });
-    } catch (e) { res.status(500).json({ success: false, msg: 'CF API 请求失败' }); }
+        const cfg = await getDnsApiConfig();
+        if (!cfg?.domain || !cfg?.token) {
+            return res.json({ success: true, data: [], msg: '未配置腾讯 DNS，先到设置页保存即可' });
+        }
+        let target = null;
+        try {
+            target = await resolveDnsTarget(cfg);
+        } catch (e) {
+            return res.json({ success: true, data: [], msg: e.message || '主域识别失败，请先到设置页完善' });
+        }
+
+        const data = await requestDnsPod('Record.List', {
+            domain: target.domain,
+            sub_domain: target.subDomain,
+            length: 3000
+        });
+        if (!isDnsPodSuccess(data)) {
+            return res.json({ success: false, msg: `腾讯 DNS 请求失败: ${data?.status?.message || '未知错误'}` });
+        }
+        const records = (data.records || [])
+            .filter(r => r.type === 'A' || r.type === 'AAAA')
+            .map(r => ({
+                id: r.id,
+                content: r.value,
+                type: r.type,
+                line: r.line
+            }));
+        res.json({ success: true, data: records });
+    } catch (e) { res.status(500).json({ success: false, msg: `腾讯 DNS 请求失败: ${e.message}` }); }
 });
 
 app.post('/api/cf/dns/add', async (req, res) => {
     try {
         const { ip } = req.body;
-        const raw = await getSetting('cf_api');
-        const { zoneId, domain } = raw ? JSON.parse(raw) : {};
-        if (!zoneId || !domain) return res.json({ success: false, msg: '请先完成 CF 设置' });
-
-        const result = await requestCF(`/zones/${zoneId}/dns_records`, 'POST', {
-            type: 'A', name: domain, content: ip, proxied: false, ttl: 60
+        const cfg = await getDnsApiConfig();
+        if (!cfg?.domain || !cfg?.token) return res.json({ success: false, msg: '请先完成腾讯 DNS 设置' });
+        const target = await resolveDnsTarget(cfg);
+        const type = String(ip || '').includes(':') ? 'AAAA' : 'A';
+        const line = normalizeDnsLine(req.body?.line || cfg.line);
+        const result = await requestDnsPod('Record.Create', {
+            domain: target.domain,
+            sub_domain: target.subDomain,
+            record_type: type,
+            record_line: DNSPOD_LINE_MAP[line],
+            value: String(ip || '').trim(),
+            ttl: 600
         });
-        res.json({ success: result.success, msg: result.errors?.[0]?.message });
+        res.json({ success: isDnsPodSuccess(result), msg: result?.status?.message });
     } catch (e) { res.status(500).json({ success: false, msg: e.message }); }
 });
 
 app.delete('/api/cf/dns/:id', async (req, res) => {
     try {
         const recordId = req.params.id;
-        const raw = await getSetting('cf_api');
-        const { zoneId } = raw ? JSON.parse(raw) : {};
-        const result = await requestCF(`/zones/${zoneId}/dns_records/${recordId}`, 'DELETE');
-        res.json({ success: result.success });
+        const cfg = await getDnsApiConfig();
+        if (!cfg?.domain || !cfg?.token) return res.json({ success: false, msg: '请先完成腾讯 DNS 设置' });
+        const target = await resolveDnsTarget(cfg);
+        const result = await requestDnsPod('Record.Remove', {
+            domain: target.domain,
+            record_id: recordId
+        });
+        res.json({ success: isDnsPodSuccess(result), msg: result?.status?.message });
     } catch (e) { res.status(500).json({ success: false, msg: e.message }); }
+});
+
+app.post('/api/cf/dns/:id/update', async (req, res) => {
+    try {
+        const recordId = req.params.id;
+        const cfg = await getDnsApiConfig();
+        if (!cfg?.domain || !cfg?.token) return res.json({ success: false, msg: '请先完成腾讯 DNS 设置' });
+        const target = await resolveDnsTarget(cfg);
+
+        const value = String(req.body?.ip || '').trim();
+        if (!value) return res.json({ success: false, msg: 'IP 不能为空' });
+        const lineKey = normalizeDnsLine(req.body?.line || cfg.line);
+        const type = value.includes(':') ? 'AAAA' : 'A';
+        const result = await requestDnsPod('Record.Modify', {
+            domain: target.domain,
+            record_id: recordId,
+            sub_domain: target.subDomain,
+            record_type: type,
+            record_line: DNSPOD_LINE_MAP[lineKey],
+            value,
+            ttl: 600
+        });
+        res.json({ success: isDnsPodSuccess(result), msg: result?.status?.message });
+    } catch (e) {
+        res.status(500).json({ success: false, msg: e.message });
+    }
 });
 
 app.post('/api/cf/dns/sync', async (req, res) => {
     try {
-        const { ips, clearOnly } = req.body;
-        const raw = await getSetting('cf_api');
-        const { zoneId, domain } = raw ? JSON.parse(raw) : {};
-        if (!zoneId || !domain) return res.json({ success: false, msg: '未配置 CF 信息' });
+        const { ips, line, records } = req.body || {};
+        const cfg = await getDnsApiConfig();
+        if (!cfg?.domain || !cfg?.token) return res.json({ success: false, msg: '未配置腾讯 DNS 信息' });
+        const target = await resolveDnsTarget(cfg);
 
-        const curr = await requestCF(`/zones/${zoneId}/dns_records?type=A&name=${domain}`, 'GET');
-        if (curr.success && curr.result) {
-            for (const record of curr.result) await requestCF(`/zones/${zoneId}/dns_records/${record.id}`, 'DELETE');
+        const curr = await requestDnsPod('Record.List', {
+            domain: target.domain,
+            sub_domain: target.subDomain,
+            length: 3000
+        });
+        if (!isDnsPodSuccess(curr)) {
+            return res.json({ success: false, msg: curr?.status?.message || '读取现有记录失败' });
         }
-        
-        if (clearOnly) return res.json({ success: true, msg: '已清空解析' });
+        const existing = new Set((curr.records || [])
+            .filter(r => r.type === 'A' || r.type === 'AAAA')
+            .map(r => `${String(r.value || '').trim()}|${String(r.type || 'A')}|${lineLabelToKey(r.line)}`));
 
         let added = 0;
-        for (const ip of ips) {
-            const addRes = await requestCF(`/zones/${zoneId}/dns_records`, 'POST', {
-                type: 'A', name: domain, content: ip, proxied: false, ttl: 60
+        let skipped = 0;
+        const baseLine = normalizeDnsLine(line || cfg.line);
+        const normalizedRecords = Array.isArray(records)
+            ? records.map(item => {
+                const value = String(item?.value || item?.ip || '').trim();
+                const type = String(item?.type || (value.includes(':') ? 'AAAA' : 'A')).toUpperCase() === 'AAAA' ? 'AAAA' : 'A';
+                const lineKey = normalizeDnsLine(item?.line || baseLine);
+                return { value, type, lineKey };
+            }).filter(r => r.value)
+            : (Array.isArray(ips) ? ips.map(ip => {
+                const value = String(ip || '').trim();
+                const type = value.includes(':') ? 'AAAA' : 'A';
+                return { value, type, lineKey: baseLine };
+            }).filter(r => r.value) : []);
+
+        for (const rec of normalizedRecords) {
+            const value = rec.value;
+            const type = rec.type;
+            const lineKey = rec.lineKey;
+            const key = `${value}|${type}|${lineKey}`;
+            if (existing.has(key)) {
+                skipped++;
+                continue;
+            }
+            const addRes = await requestDnsPod('Record.Create', {
+                domain: target.domain,
+                sub_domain: target.subDomain,
+                record_type: type,
+                record_line: DNSPOD_LINE_MAP[lineKey],
+                value,
+                ttl: 600
             });
-            if (addRes.success) added++;
+            if (isDnsPodSuccess(addRes)) {
+                added++;
+                existing.add(key);
+            }
         }
-        res.json({ success: true, added });
-    } catch (e) { res.status(500).json({ success: false, msg: '同步解析失败' }); }
+        res.json({ success: true, added, skipped });
+    } catch (e) { res.status(500).json({ success: false, msg: `同步解析失败: ${e.message}` }); }
+});
+
+// --- DNS 候选 IP 暂存（由测速/收藏页提交，DNS 页手动发布） ---
+app.get('/api/dns/staging', async (req, res) => {
+    try {
+        const raw = await getSetting('dns_staging');
+        let records = [];
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            if (Array.isArray(parsed)) {
+                if (parsed.length && typeof parsed[0] === 'string') {
+                    records = parsed.map(v => {
+                        const value = String(v || '').trim();
+                        return { type: value.includes(':') ? 'AAAA' : 'A', line: 'default', value };
+                    }).filter(r => r.value);
+                } else {
+                    records = parsed.map(item => {
+                        const value = String(item?.value || item?.ip || '').trim();
+                        const type = String(item?.type || (value.includes(':') ? 'AAAA' : 'A')).toUpperCase() === 'AAAA' ? 'AAAA' : 'A';
+                        const line = normalizeDnsLine(item?.line);
+                        return { type, line, value };
+                    }).filter(r => r.value);
+                }
+            }
+        }
+        const uniq = [];
+        const seen = new Set();
+        for (const r of records) {
+            const k = `${r.type}|${r.line}|${r.value}`;
+            if (seen.has(k)) continue;
+            seen.add(k);
+            uniq.push(r);
+        }
+        res.json({ success: true, data: uniq });
+    } catch (e) {
+        res.json({ success: false, msg: '读取候选记录失败' });
+    }
+});
+
+app.post('/api/dns/staging', async (req, res) => {
+    try {
+        const incomingRecords = Array.isArray(req.body?.records) ? req.body.records : [];
+        const incomingIps = Array.isArray(req.body?.ips) ? req.body.ips : [];
+        const normalized = [];
+        for (const item of incomingRecords) {
+            const value = String(item?.value || item?.ip || '').trim();
+            if (!value) continue;
+            const type = String(item?.type || (value.includes(':') ? 'AAAA' : 'A')).toUpperCase() === 'AAAA' ? 'AAAA' : 'A';
+            const line = normalizeDnsLine(item?.line);
+            normalized.push({ type, line, value });
+        }
+        for (const ip of incomingIps) {
+            const value = String(ip || '').trim();
+            if (!value) continue;
+            normalized.push({ type: value.includes(':') ? 'AAAA' : 'A', line: normalizeDnsLine(req.body?.line), value });
+        }
+        if (!normalized.length) return res.json({ success: false, msg: '没有可暂存的记录' });
+
+        const oldRaw = await getSetting('dns_staging');
+        let old = [];
+        if (oldRaw) {
+            try {
+                const parsed = JSON.parse(oldRaw);
+                if (Array.isArray(parsed)) {
+                    old = parsed.map(item => {
+                        const value = String(item?.value || item?.ip || item || '').trim();
+                        if (!value) return null;
+                        const type = String(item?.type || (value.includes(':') ? 'AAAA' : 'A')).toUpperCase() === 'AAAA' ? 'AAAA' : 'A';
+                        const line = normalizeDnsLine(item?.line);
+                        return { type, line, value };
+                    }).filter(Boolean);
+                }
+            } catch (_) {}
+        }
+        const merged = [];
+        const seen = new Set();
+        for (const r of [...old, ...normalized]) {
+            const k = `${r.type}|${r.line}|${r.value}`;
+            if (seen.has(k)) continue;
+            seen.add(k);
+            merged.push(r);
+        }
+        await setSetting('dns_staging', JSON.stringify(merged));
+        res.json({ success: true, data: merged, added: normalized.length, total: merged.length });
+    } catch (e) {
+        res.json({ success: false, msg: '暂存失败' });
+    }
+});
+
+app.put('/api/dns/staging', async (req, res) => {
+    try {
+        const incoming = Array.isArray(req.body?.records) ? req.body.records : [];
+        const normalized = incoming.map(item => {
+            const value = String(item?.value || item?.ip || '').trim();
+            if (!value) return null;
+            const type = String(item?.type || (value.includes(':') ? 'AAAA' : 'A')).toUpperCase() === 'AAAA' ? 'AAAA' : 'A';
+            const line = normalizeDnsLine(item?.line);
+            return { type, line, value };
+        }).filter(Boolean);
+        await setSetting('dns_staging', JSON.stringify(normalized));
+        res.json({ success: true, data: normalized });
+    } catch (e) {
+        res.json({ success: false, msg: '保存候选记录失败' });
+    }
+});
+
+app.delete('/api/dns/staging', async (req, res) => {
+    try {
+        await setSetting('dns_staging', JSON.stringify([]));
+        res.json({ success: true });
+    } catch (e) {
+        res.json({ success: false, msg: '清空候选失败' });
+    }
 });
 
 // --- 设置获取 ---

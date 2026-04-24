@@ -40,17 +40,24 @@ const selectedCountSpan = document.getElementById('selected-count');
 const toast = document.getElementById('toast');
 const themeMode = document.getElementById('theme-mode');
 
-const cfZoneId = document.getElementById('cf-zone-id');
 const cfDomain = document.getElementById('cf-domain');
-const cfToken = document.getElementById('cf-token');
-const cfEmail = document.getElementById('cf-email');
+const cfTokenId = document.getElementById('cf-token-id');
+const cfTokenKey = document.getElementById('cf-token-key');
 const saveCfSettingsBtn = document.getElementById('save-cf-settings-btn');
-const refreshDnsBtn = document.getElementById('refresh-dns-btn');
-const clearDnsBtn = document.getElementById('clear-dns-btn');
-const dnsRecordList = document.getElementById('dns-record-list');
+const dnsStagingList = document.getElementById('dns-staging-list');
 const dnsDomainLabel = document.getElementById('dns-domain-label');
-const manualDnsIp = document.getElementById('manual-dns-ip');
-const addDnsBtn = document.getElementById('add-dns-btn');
+const addDnsRowBtn = document.getElementById('add-dns-row-btn');
+const publishDnsBtn = document.getElementById('publish-dns-btn');
+const clearStagingBtn = document.getElementById('clear-staging-btn');
+let dnsStagingRecords = [];
+function normalizeLineKey(v) { return ['default', 'telecom', 'unicom', 'mobile'].includes(String(v || '').toLowerCase()) ? String(v).toLowerCase() : 'default'; }
+function lineTextToKey(lineText) {
+    const t = String(lineText || '').trim();
+    if (t === '电信') return 'telecom';
+    if (t === '联通') return 'unicom';
+    if (t === '移动') return 'mobile';
+    return 'default';
+}
 
 const cfstMode = document.getElementById('cfst-mode');
 const cfstHttpingBox = document.getElementById('cfst-httping-box');
@@ -153,8 +160,8 @@ function switchTab(view) {
         tabDns?.classList.add('active');
         dnsViewContainer?.classList.remove('hidden');
         bottomBar?.classList.add('hide-down');
-        if(pageDesc) pageDesc.innerText = 'Cloudflare 域名解析管理与优选 IP 一键同步';
-        loadDnsRecords();
+        if(pageDesc) pageDesc.innerText = '腾讯 DNSPod 解析管理与优选 IP 一键同步';
+        loadDnsStaging();
     } else {
         tabTest?.classList.add('active');
         testViewContainer?.classList.remove('hidden');
@@ -188,94 +195,193 @@ async function loadCfApiConfig() {
         const res = await fetch('/api/settings/cf');
         const { data } = await res.json();
         if (data) {
-            if(cfZoneId) cfZoneId.value = data.zoneId || ''; 
             if(cfDomain) cfDomain.value = data.domain || '';
-            if(cfToken) cfToken.value = data.token || ''; 
-            if(cfEmail) cfEmail.value = data.email || '';
-            if(data.domain && dnsDomainLabel) dnsDomainLabel.innerText = `当前管理: ${data.domain}`;
+            if(cfTokenId) cfTokenId.value = data.tokenId || '';
+            if(cfTokenKey) cfTokenKey.value = data.tokenKey || '';
+            if (dnsDomainLabel) {
+                if (data.domain) dnsDomainLabel.innerText = `当前管理: ${data.domain}`;
+            }
         }
     } catch (e) {}
 }
 
 saveCfSettingsBtn?.addEventListener('click', async () => {
-    const payload = { zoneId: cfZoneId?.value.trim() || '', domain: cfDomain?.value.trim() || '', token: cfToken?.value.trim() || '', email: cfEmail?.value.trim() || '' };
+    const payload = {
+        domain: cfDomain?.value.trim() || '',
+        tokenId: cfTokenId?.value.trim() || '',
+        tokenKey: cfTokenKey?.value.trim() || ''
+    };
     try {
         await fetch('/api/settings/cf', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
-        showToast('✅ CF 配置已保存');
-        if(payload.domain && dnsDomainLabel) dnsDomainLabel.innerText = `当前管理: ${payload.domain}`;
+        showToast('✅ 腾讯 DNS 配置已保存');
+        if (dnsDomainLabel) {
+            if (payload.domain) dnsDomainLabel.innerText = `当前管理: ${payload.domain}`;
+        }
     } catch (e) { showToast('❌ 保存失败'); }
 });
 
-async function loadDnsRecords() {
-    if(!dnsRecordList) return;
-    dnsRecordList.innerHTML = '<div class="history-item"><div class="spinner"></div>正在获取...</div>';
+async function loadDnsStaging() {
+    if (!dnsStagingList) return [];
+    dnsStagingList.innerHTML = '<div class="history-item"><div class="spinner"></div>正在获取...</div>';
     try {
-        const res = await fetch('/api/cf/dns');
-        const json = await res.json();
-        if (!json.success) return dnsRecordList.innerHTML = `<div class="history-item" style="color:#ef4444;">${json.msg || '获取失败'}</div>`;
-        const records = json.data || [];
-        if (records.length === 0) return dnsRecordList.innerHTML = '<div class="history-item text-center">当前域名下无 A 记录</div>';
+        const [stagingRes, liveRes] = await Promise.all([
+            fetch('/api/dns/staging').then(r => r.json()).catch(() => ({ success: false, msg: '读取新增记录失败' })),
+            fetch('/api/cf/dns').then(r => r.json()).catch(() => ({ success: false, msg: '读取现有记录失败' }))
+        ]);
 
-        const ips = records.map(r => r.content);
-        let regionMap = {};
-        try {
-            const regRes = await fetch('/api/regions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ips }) });
-            const regJson = await regRes.json();
-            if (regJson.success) regionMap = regJson.data || {};
-        } catch(e) {}
+        const stagingRows = (Array.isArray(stagingRes?.data) ? stagingRes.data : []).map(item => ({
+            source: 'staging',
+            type: String(item?.type || 'A').toUpperCase() === 'AAAA' ? 'AAAA' : 'A',
+            line: normalizeLineKey(item?.line),
+            value: String(item?.value || item?.ip || '').trim()
+        })).filter(r => r.value);
 
-        dnsRecordList.innerHTML = records.map(r => {
-            const region = regionMap[r.content] || '❓ 未知';
-            return `
-            <div class="history-item" style="align-items: center;">
-                <div style="display: flex; flex-direction: column; gap: 0.3rem;">
-                    <div style="display: flex; align-items: center; gap: 0.5rem;">
-                        <span class="font-mono text-slate-800" style="font-size: 1rem;">${r.content}</span>
-                        <span class="region-badge" style="font-size: 0.65rem; padding: 0.15rem 0.45rem; line-height: 1;">${region}</span>
-                    </div>
-                    <span style="font-size: 0.7rem; color: #94a3b8;">${r.proxied ? '☁️ 代理模式 (CDN)' : '🌐 直连模式 (仅 DNS)'}</span>
-                </div>
-                <button class="single-dns-del-btn" data-id="${r.id}" style="background: none; border: none; color: #94a3b8; cursor: pointer; padding: 4px; font-size: 1.1rem; transition: color 0.2s;">🗑️</button>
-            </div>
-            `;
-        }).join('');
+        const liveRows = (Array.isArray(liveRes?.data) ? liveRes.data : []).map(item => ({
+            source: 'live',
+            id: item.id,
+            type: String(item?.type || 'A').toUpperCase() === 'AAAA' ? 'AAAA' : 'A',
+            line: lineTextToKey(item?.line),
+            value: String(item?.content || item?.value || '').trim()
+        })).filter(r => r.value);
 
-        document.querySelectorAll('.single-dns-del-btn').forEach(btn => {
-            btn.addEventListener('mouseover', () => btn.style.color = '#ef4444');
-            btn.addEventListener('mouseout', () => btn.style.color = '#94a3b8');
-            btn.addEventListener('click', async () => {
-                if(!confirm('确定删除此条解析吗？')) return;
-                const recordId = btn.dataset.id;
-                try {
-                    const delRes = await fetch(`/api/cf/dns/${recordId}`, { method: 'DELETE' });
-                    if((await delRes.json()).success) { showToast('✅ 已删除'); loadDnsRecords(); }
-                } catch(e) { showToast('❌ 删除失败'); }
-            });
-        });
-    } catch (e) { dnsRecordList.innerHTML = '<div class="history-item">网络错误</div>'; }
+        const seen = new Set();
+        const merged = [];
+        for (const r of [...liveRows, ...stagingRows]) {
+            const key = `${r.type}|${r.line}|${r.value}`;
+            if (seen.has(key)) continue;
+            seen.add(key);
+            merged.push(r);
+        }
+        dnsStagingRecords = merged;
+        renderDnsStagingRows();
+        return dnsStagingRecords;
+    } catch (e) {
+        dnsStagingList.innerHTML = '<div class="history-item" style="color:#ef4444;">网络错误</div>';
+        return [];
+    }
 }
-refreshDnsBtn?.addEventListener('click', loadDnsRecords);
 
-addDnsBtn?.addEventListener('click', async () => {
-    const ip = manualDnsIp.value.trim();
-    if(!ip) return showToast('❌ 请输入有效的 IP');
-    addDnsBtn.disabled = true;
+function renderDnsStagingRows() {
+    if (!dnsStagingList) return;
+    dnsStagingList.style.overflowX = 'auto';
+    dnsStagingList.style.overflowY = 'hidden';
+    dnsStagingList.style.paddingBottom = '4px';
+    if (!dnsStagingRecords.length) {
+        dnsStagingList.innerHTML = '<div class="history-item text-center">暂无 DNS 记录</div>';
+        return;
+    }
+    dnsStagingList.innerHTML = dnsStagingRecords.map((r, idx) => `
+        <div class="history-item" style="display:flex;flex-wrap:nowrap;gap:10px;align-items:center;padding:0.6rem 0;border-bottom:1px solid #f1f5f9;min-width:max-content;">
+            <select class="dns-stage-type" data-idx="${idx}" ${r.source === 'live' ? 'disabled' : ''} style="width:62px;border:1px solid #e2e8f0;border-radius:6px;padding:0.4rem 0.2rem;font-size:0.8rem;background:${r.source === 'live' ? '#f8fafc' : '#fff'};color:#475569;outline:none;">
+                <option value="A" ${r.type === 'A' ? 'selected' : ''}>A</option>
+                <option value="AAAA" ${r.type === 'AAAA' ? 'selected' : ''}>AAAA</option>
+            </select>
+            <select class="dns-stage-line" data-idx="${idx}" style="width:64px;border:1px solid #e2e8f0;border-radius:6px;padding:0.4rem 0.2rem;font-size:0.8rem;background:#fff;color:#475569;outline:none;">
+                <option value="default" ${r.line === 'default' ? 'selected' : ''}>默认</option>
+                <option value="telecom" ${r.line === 'telecom' ? 'selected' : ''}>电信</option>
+                <option value="unicom" ${r.line === 'unicom' ? 'selected' : ''}>联通</option>
+                <option value="mobile" ${r.line === 'mobile' ? 'selected' : ''}>移动</option>
+            </select>
+            <input class="dns-stage-value" data-idx="${idx}" value="${r.value}" placeholder="IP (IPv4/IPv6)" style="flex:1;min-width:152px;border:1px solid #e2e8f0;border-radius:6px;padding:0.4rem 0.6rem;font-size:0.85rem;font-family:monospace;color:#1e293b;outline:none;background:#fff;transition:border-color 0.2s;">
+            <button class="dns-stage-del" data-idx="${idx}" style="background:none;border:none;color:#ef4444;cursor:pointer;padding:0.4rem;display:flex;align-items:center;justify-content:center;border-radius:6px;transition:background 0.2s;" onmouseover="this.style.background='#fee2e2'" onmouseout="this.style.background='none'" title="删除记录">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
+            </button>
+            <span style="font-size:0.7rem;font-weight:600;padding:0.2rem 0.4rem;border-radius:4px;background:${r.source === 'live' ? '#e0e7ff' : '#dcfce7'};color:${r.source === 'live' ? '#4338ca' : '#16a34a'};width:36px;text-align:center;">${r.source === 'live' ? '线上' : '新增'}</span>
+        </div>
+    `).join('');
+
+    document.querySelectorAll('.dns-stage-type').forEach(el => el.addEventListener('change', async () => {
+        const idx = Number(el.dataset.idx);
+        if (!Number.isFinite(idx) || !dnsStagingRecords[idx]) return;
+        dnsStagingRecords[idx].type = String(el.value || 'A').toUpperCase() === 'AAAA' ? 'AAAA' : 'A';
+        await persistDnsStagingRecords();
+    }));
+    document.querySelectorAll('.dns-stage-line').forEach(el => el.addEventListener('change', async () => {
+        const idx = Number(el.dataset.idx);
+        if (!Number.isFinite(idx) || !dnsStagingRecords[idx]) return;
+        const row = dnsStagingRecords[idx];
+        row.line = normalizeLineKey(el.value);
+        if (row.source === 'live') await updateLiveDnsRecord(row);
+        else await persistDnsStagingRecords();
+    }));
+    document.querySelectorAll('.dns-stage-value').forEach(el => el.addEventListener('change', async () => {
+        const idx = Number(el.dataset.idx);
+        if (!Number.isFinite(idx) || !dnsStagingRecords[idx]) return;
+        const row = dnsStagingRecords[idx];
+        row.value = String(el.value || '').trim();
+        if (!row.value) return;
+        if (row.source === 'live') await updateLiveDnsRecord(row);
+        else await persistDnsStagingRecords();
+    }));
+    document.querySelectorAll('.dns-stage-del').forEach(btn => btn.addEventListener('click', async () => {
+        const idx = Number(btn.dataset.idx);
+        if (!Number.isFinite(idx)) return;
+        const row = dnsStagingRecords[idx];
+        if (!row) return;
+        if (row.source === 'live') {
+            try {
+                const delRes = await fetch(`/api/cf/dns/${row.id}`, { method: 'DELETE' });
+                const delJson = await delRes.json();
+                if (!delJson.success) return showToast(`❌ 删除失败: ${delJson.msg || '未知错误'}`);
+            } catch (_) { return showToast('❌ 网络错误'); }
+            await loadDnsStaging();
+            return;
+        }
+        dnsStagingRecords.splice(idx, 1);
+        await persistDnsStagingRecords();
+        renderDnsStagingRows();
+    }));
+}
+
+async function updateLiveDnsRecord(row) {
     try {
-        const res = await fetch('/api/cf/dns/add', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ip }) });
+        const res = await fetch(`/api/cf/dns/${row.id}/update`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip: row.value, line: row.line })
+        });
         const json = await res.json();
-        if(json.success) { showToast('✅ 添加成功'); manualDnsIp.value = ''; loadDnsRecords(); } 
-        else { showToast(`❌ 失败: ${json.msg}`); }
-    } finally { addDnsBtn.disabled = false; }
+        if (!json.success) return showToast(`❌ 更新失败: ${json.msg || '未知错误'}`);
+        showToast('✅ 已更新');
+        await loadDnsStaging();
+    } catch (_) {
+        showToast('❌ 网络错误');
+    }
+}
+
+async function persistDnsStagingRecords() {
+    const records = dnsStagingRecords.map(r => ({
+        type: r.type === 'AAAA' ? 'AAAA' : 'A',
+        line: normalizeLineKey(r.line),
+        value: String(r.value || '').trim()
+    })).filter(r => r.value && r.source !== 'live');
+    await fetch('/api/dns/staging', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ records })
+    });
+}
+
+addDnsRowBtn?.addEventListener('click', async () => {
+    dnsStagingRecords.push({ source: 'staging', type: 'A', line: 'default', value: '' });
+    renderDnsStagingRows();
 });
 
-async function syncToCloudflare(ips, clearOnly = false) {
+async function syncToCloudflare(records) {
     if(!syncCfBtn) return;
     const oldText = syncCfBtn.innerText;
     syncCfBtn.innerText = '📡 推送中...'; syncCfBtn.disabled = true;
     try {
-        const res = await fetch('/api/cf/dns/sync', { method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({ ips, clearOnly }) });
+        const res = await fetch('/api/cf/dns/sync', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ records })
+        });
         const json = await res.json();
-        if (json.success) { showToast(clearOnly ? '🧹 域名解析已清空' : `✅ 成功更新 ${json.added} 条记录`); if (currentView === 'dns') loadDnsRecords(); }
+        if (json.success) {
+            showToast(`✅ 新增 ${json.added || 0} 条，跳过 ${json.skipped || 0} 条`);
+            if (currentView === 'dns') loadDnsStaging();
+        }
         else showToast(`❌ 同步失败: ${json.msg}`);
     } catch (e) { showToast('❌ 网络错误'); }
     finally { syncCfBtn.innerText = oldText; updateSelectionState(); }
@@ -284,10 +390,45 @@ syncCfBtn?.addEventListener('click', () => {
     if (!resultBody) return;
     const selectedIps = Array.from(resultBody.querySelectorAll('.ip-checkbox:checked')).map(cb => cb.dataset.ip);
     if(selectedIps.length === 0) return showToast('❌ 请先选择节点');
-    if(confirm(`确定要将这 ${selectedIps.length} 个 IP 覆盖解析到 CF 吗？`)) syncToCloudflare(selectedIps);
+    if (!confirm(`将这 ${selectedIps.length} 个 IP 加入 DNS 记录列表？`)) return;
+    const records = selectedIps.map(ip => ({
+        type: String(ip || '').includes(':') ? 'AAAA' : 'A',
+        line: 'default',
+        value: String(ip || '').trim()
+    }));
+    fetch('/api/dns/staging', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ records })
+    }).then(r => r.json()).then(json => {
+        if (!json.success) return showToast(`❌ 暂存失败: ${json.msg || '未知错误'}`);
+        showToast(`✅ 已加入 DNS 记录列表 (${json.total || selectedIps.length})`);
+        switchTab('dns');
+    }).catch(() => showToast('❌ 网络错误'));
 });
-clearDnsBtn?.addEventListener('click', () => {
-    if(confirm('⚠️ 危险操作：确定清空该子域名的所有 A/AAAA 记录吗？')) syncToCloudflare([], true);
+
+publishDnsBtn?.addEventListener('click', async () => {
+    const records = (await loadDnsStaging()).filter(r => r.source !== 'live');
+    if (!records.length) return showToast('❌ 没有新增记录可发布');
+    if (!confirm(`确认将 ${records.length} 条新增记录提交到腾讯 DNS？`)) return;
+    await syncToCloudflare(records.map(r => ({ type: r.type, line: r.line, value: r.value })));
+    try {
+        await fetch('/api/dns/staging', { method: 'DELETE' });
+        await loadDnsStaging();
+    } catch (e) {}
+});
+
+clearStagingBtn?.addEventListener('click', async () => {
+    if (!confirm('确定清空所有新增记录吗？（不影响线上已存在记录）')) return;
+    try {
+        const res = await fetch('/api/dns/staging', { method: 'DELETE' });
+        const json = await res.json();
+        if (!json.success) return showToast(`❌ 清空失败: ${json.msg || '未知错误'}`);
+        showToast('✅ 新增记录已清空');
+        loadDnsStaging();
+    } catch (e) {
+        showToast('❌ 网络错误');
+    }
 });
 
 function applyTheme(mode) {

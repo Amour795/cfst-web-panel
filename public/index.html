@@ -76,8 +76,7 @@
         .action-btn:disabled { background-color: #94a3b8 !important; cursor: not-allowed; }
         .btn-copy { background-color: #10b981; } .btn-save { background-color: #3b82f6; } .btn-tag { background-color: #8b5cf6; } .btn-delete { background-color: #ef4444; }
 
-        .history-panel { margin-top: 0.6rem; border: 1px solid #e2e8f0; border-radius: 0.7rem; overflow: hidden; }
-        .history-header { padding: 0.55rem 0.75rem; font-size: 0.78rem; font-weight: 700; color: #475569; background: #f8fafc; border-bottom: 1px solid #e2e8f0; }
+        .history-panel {  overflow: hidden; }
         .history-item { padding: 0.55rem 0.75rem; font-size: 0.78rem; color: #334155; border-bottom: 1px solid #f1f5f9; display: flex; justify-content: space-between; gap: 0.6rem; }
         
         .copyable-ip { cursor: pointer; display: flex; align-items: center; justify-content: space-between; padding: 0.2rem 0.4rem; border-radius: 0.375rem; transition: background 0.2s; }
@@ -191,21 +190,15 @@
             <div class="glass-card settings-area">
                 <div class="setting-row">
                     <label style="font-size: 1.1rem;">DNS 解析管理</label>
-                    <div class="setting-hint" id="dns-domain-label">请在设置中配置 CF 信息</div>
-                </div>
-                
-                <div style="display: flex; gap: 0.5rem; margin-bottom: 0.5rem;">
-                    <input id="manual-dns-ip" type="text" placeholder="手动输入 IP 地址..." style="flex: 1; border-radius: 0.5rem; border: 1px solid #cbd5e1; padding: 0.5rem;">
-                    <button id="add-dns-btn" class="tool-btn primary" style="white-space: nowrap;">➕ 添加记录</button>
+                    <div class="setting-hint" id="dns-domain-label">请在设置中配置腾讯 DNS 信息</div>
                 </div>
 
-                <div class="setting-actions">
-                    <button id="refresh-dns-btn" class="tool-btn primary">🔄 刷新列表</button>
-                    <button id="clear-dns-btn" class="tool-btn" style="color: #ef4444;">🧹 清空全部解析</button>
-                </div>
-                <div class="history-panel" style="margin-top: 1rem;">
-                    <div class="history-header">当前 A/AAAA 记录 (仅展示匹配域名的记录)</div>
-                    <div id="dns-record-list"><div class="history-item text-center">暂无数据</div></div>
+                <div class="history-panel">
+                    <div id="dns-staging-list"><div class="history-item text-center">暂无 DNS 记录</div></div>
+                    <div class="setting-actions" style="margin-top: 0.6rem;">
+                        <button id="add-dns-row-btn" class="tool-btn">➕ 新增记录</button>
+                        <button id="publish-dns-btn" class="tool-btn primary">保存DNS</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -213,15 +206,14 @@
         <div id="settings-view-container" class="hidden">
             <div class="glass-card settings-area" style="margin-bottom: 1.5rem;">
                 <div class="setting-row">
-                    <label style="font-size: 1rem; color: #f59e0b;">Cloudflare DNS 解析配置</label>
-                    <div class="setting-hint">用于自动将优选 IP 更新到你的域名下。</div>
+                    <label style="font-size: 1rem; color: #f59e0b;">腾讯 DNSPod 解析配置</label>
+                    <div class="setting-hint">仅用于账号与域名接入，DNS 线路等操作项请到 DNS 页面配置。</div>
                 </div>
-                <div class="setting-row"><label>Zone ID (区域 ID)</label><input id="cf-zone-id" type="text" placeholder="你的域名的 Zone ID"></div>
-                <div class="setting-row"><label>需解析的子域名</label><input id="cf-domain" type="text" placeholder="例如: cdn.example.com"></div>
-                <div class="setting-row"><label>API Token / Global API Key</label><input id="cf-token" type="password" placeholder="输入 Token 或 Key"></div>
-                <!-- <div class="setting-row"><label>CF 账号邮箱</label><input id="cf-email" type="text" placeholder="仅 Global Key 模式必填，Token模式留空"></div> -->
+                <div class="setting-row"><label>需解析的完整子域名</label><input id="cf-domain" type="text" placeholder="例如: cdn.example.com"></div>
+                <div class="setting-row"><label>DNSPod Token ID</label><input id="cf-token-id" type="text" placeholder="例如: 12345"></div>
+                <div class="setting-row"><label>DNSPod Token</label><input id="cf-token-key" type="password" placeholder="例如: xxxxxxxxxxxxxxxx"></div>
                 <div class="setting-actions" style="margin-top: 0.5rem;">
-                    <button id="save-cf-settings-btn" class="tool-btn primary" style="background: #fef3c7; color: #d97706; border-color: #fde68a;">💾 保存 CF 配置</button>
+                    <button id="save-cf-settings-btn" class="tool-btn primary" style="background: #fef3c7; color: #d97706; border-color: #fde68a;">💾 保存腾讯 DNS 配置</button>
                 </div>
             </div>
 
@@ -332,7 +324,7 @@
                     <button id="copy-selected-btn" class="action-btn btn-copy" disabled>📋 复制</button>
                     <button id="save-selected-btn" class="action-btn btn-save" disabled>💾 收藏</button>
                     <button id="tag-selected-btn" class="action-btn btn-tag hidden" disabled>🏷️ 标签</button>
-                    <button id="sync-cf-btn" class="action-btn" style="background-color: #f59e0b;" disabled>📡 更新CF解析</button>
+                    <button id="sync-cf-btn" class="action-btn" style="background-color: #f59e0b;" disabled>📡 更新腾讯DNS解析</button>
                     <button id="delete-selected-btn" class="action-btn btn-delete hidden" disabled>🗑️ 删除</button>
                 </div>
             </div>
