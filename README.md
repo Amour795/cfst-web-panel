@@ -1,6 +1,6 @@
 # cfst-web-panel
 
-一个面向本地场景的 Cloudflare 节点测速与 DNS 同步面板。  
+一个面向本地场景的 Cloudflare 节点测速与 DNS 同步面板。\
 后端基于 `Node.js + Express` 调用 `cfst` 引擎测速，前端为单页静态页面，提供测速、收藏、DNS 管理与参数设置。
 
 项目地址：<https://github.com/Amour795/cfst-web-panel>
@@ -8,7 +8,11 @@
 ## 上游项目
 
 - `cfst`（CloudflareSpeedTest）原项目地址：<https://github.com/XIU2/CloudflareSpeedTest>
-- 本项目为 `cfst` 的本地 Web 面板封装，核心测速能力来自上游 `cfst` 引擎
+- 本项目不是测速引擎本体，而是基于 `cfst` 的本地 Web 管理面板；`延迟/下载测速`、`结果 CSV 输出` 等核心能力均来自上游 `cfst`
+- 本项目主要提供上层能力：可视化配置、任务进度展示（SSE/轮询）、收藏与历史管理、Cloudflare DNS 同步、主题切换等
+- 运行时会直接调用项目根目录中的 `cfst` 可执行文件（Windows 为 `cfst.exe`，Linux/macOS 为 `cfst`），因此功能边界和参数语义与上游版本保持强关联
+- 若上游 `cfst` 发布新参数或行为变更，本项目通常无需改动核心测速逻辑，但可能需要在前端设置项与参数映射上做同步适配
+- 感谢上游作者与社区维护，本项目定位为“本地运维场景的增强面板”，不替代上游命令行工具
 
 ## 项目背景
 
@@ -53,7 +57,7 @@
 
 ## 安装与部署
 
-### 推荐一键安装（最优解）
+### 推荐安装方式
 
 #### Linux / macOS / Termux
 
@@ -61,20 +65,18 @@
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/Amour795/cfst-web-panel/main/install.sh)"
 ```
 
-#### Windows（PowerShell）
+Linux/macOS/Termux 推荐使用一键脚本。
+
+### Windows 手动安装（推荐）
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://raw.githubusercontent.com/Amour795/cfst-web-panel/main/install.ps1 | iex"
+git clone https://github.com/Amour795/cfst-web-panel.git
+cd cfst-web-panel
+npm install
+npm run build:min
+# 下载并解压 cfst_windows_amd64.zip，放置 cfst.exe 到项目根目录
+node .\server.js
 ```
-
-网络到 GitHub 不稳定时可用镜像源：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://mirror.ghproxy.com/https://raw.githubusercontent.com/Amour795/cfst-web-panel/main/install.ps1 | iex"
-```
-
-脚本会自动完成平台检测、依赖准备、代码获取、`cfst` 引擎下载、依赖安装与启动。  
-Windows 脚本在无 `git` 时会自动切换 ZIP 模式继续安装。
 
 ### 启动访问
 
@@ -156,7 +158,6 @@ pm2 save
 │   └── min.js
 ├── server.js
 ├── install.sh
-├── install.ps1
 ├── package.json
 ├── database.json      # 运行时持久化数据
 ├── result.csv         # cfst 输出结果

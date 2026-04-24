@@ -532,6 +532,11 @@ async function requestStopCurrentTask() {
 startBtn?.addEventListener('click', async () => {
     if (currentTaskId) { await requestStopCurrentTask(); return; }
     
+    const targetIps = currentView === 'favorites'
+        ? Array.from((resultBody?.querySelectorAll('.ip-checkbox:checked') || [])).map(cb => cb.dataset.ip)
+        : parsedTargets;
+    if (currentView === 'favorites' && targetIps.length === 0) { throw new Error("请先选择要测速的 IP"); }
+
     startBtn.innerText = '⏹ 停止测试';
     startBtn.style.backgroundColor = '#ef4444';
     
@@ -547,11 +552,6 @@ startBtn?.addEventListener('click', async () => {
         closeProgressStream(); startProgressPolling(taskId);
         progressSource = new EventSource(`/api/progress/${taskId}`);
         progressSource.onmessage = (e) => { try { updateProgressUI(JSON.parse(e.data)); } catch (err) {} };
-
-        const targetIps = currentView === 'favorites'
-            ? Array.from((resultBody?.querySelectorAll('.ip-checkbox:checked') || [])).map(cb => cb.dataset.ip)
-            : parsedTargets;
-        if (currentView === 'favorites' && targetIps.length === 0) { throw new Error("请先选择要测速的 IP"); }
 
         const response = await fetch('/api/start-test', { 
             method: 'POST', headers: { 'Content-Type': 'application/json' },
