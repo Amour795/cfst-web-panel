@@ -176,6 +176,9 @@ function switchTab(view) {
         deleteSelectedBtn?.classList.add('hidden');
         renderTable(testTableData, '准备就绪，点击底部按钮开始测速');
     }
+    
+    // Save current view to localStorage
+    localStorage.setItem('currentView', view);
 }
 tabTest?.addEventListener('click', () => { if(currentView !== 'test') switchTab('test'); });
 tabFav?.addEventListener('click', () => { if(currentView !== 'favorites') switchTab('favorites'); });
@@ -825,7 +828,14 @@ resetSettingsBtn?.addEventListener('click', async () => {
 if(themeMode) { themeMode.value = localStorage.getItem('theme') || 'system'; applyTheme(themeMode.value); themeMode.dispatchEvent(new Event('change')); }
 loadCfApiConfig();
 loadCfstConfig();
-renderTable(testTableData, '准备就绪，点击底部按钮开始测速');
+
+const savedView = localStorage.getItem('currentView') || 'test';
+if (savedView !== 'test') {
+    switchTab(savedView);
+} else {
+    renderTable(testTableData, '准备就绪，点击底部按钮开始测速');
+}
+
 initCustomSelects();
 
 function initCustomSelects(container = document) {
@@ -905,7 +915,7 @@ function initCustomSelects(container = document) {
         };
 
         renderOptions();
-        wrapper.appendChild(optionsContainer);
+        document.body.appendChild(optionsContainer);
 
         select.addEventListener('change', () => {
             updateValueText();
@@ -920,17 +930,41 @@ function initCustomSelects(container = document) {
             if (!isOpen) {
                 optionsContainer.classList.add('open');
                 trigger.classList.add('active');
+                wrapper.classList.add('open');
                 
+                const triggerRect = trigger.getBoundingClientRect();
+                
+                // Position optionsContainer before calculating its height
+                optionsContainer.style.width = Math.max(triggerRect.width, optionsContainer.offsetWidth) + 'px';
+                optionsContainer.style.left = triggerRect.left + 'px';
+                
+                // Ensure options are rendered into DOM before calculation
                 const rect = optionsContainer.getBoundingClientRect();
-                if (rect.bottom > window.innerHeight) {
-                    optionsContainer.style.top = 'auto';
-                    optionsContainer.style.bottom = 'calc(100% + 0.25rem)';
+                
+                if (triggerRect.bottom + rect.height > window.innerHeight && triggerRect.top > rect.height) {
+                    // Open upwards
+                    optionsContainer.style.top = (triggerRect.top - rect.height - 4) + 'px';
                 } else {
-                    optionsContainer.style.top = 'calc(100% + 0.25rem)';
-                    optionsContainer.style.bottom = 'auto';
+                    // Open downwards
+                    optionsContainer.style.top = (triggerRect.bottom + 4) + 'px';
                 }
             }
         });
+        
+        // Ensure options container moves with scroll or resize
+        window.addEventListener('scroll', () => {
+             if(optionsContainer.classList.contains('open')) {
+                  const triggerRect = trigger.getBoundingClientRect();
+                  const rect = optionsContainer.getBoundingClientRect();
+                  optionsContainer.style.left = triggerRect.left + 'px';
+                  if (triggerRect.bottom + rect.height > window.innerHeight && triggerRect.top > rect.height) {
+                      optionsContainer.style.top = (triggerRect.top - rect.height - 4) + 'px';
+                  } else {
+                      optionsContainer.style.top = (triggerRect.bottom + 4) + 'px';
+                  }
+             }
+        }, true);
+        window.addEventListener('resize', closeAllCustomSelects);
     });
 }
 
