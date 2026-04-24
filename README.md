@@ -5,6 +5,10 @@
 
 项目地址：<https://github.com/Amour795/cfst-web-panel>
 
+## 界面预览
+
+![CFST Web Panel 界面预览](./docs/ui-preview.svg)
+
 ## 上游项目
 
 - `cfst`（CloudflareSpeedTest）原项目地址：<https://github.com/XIU2/CloudflareSpeedTest>
