@@ -271,22 +271,22 @@ function renderDnsStagingRows() {
         return;
     }
     dnsStagingList.innerHTML = dnsStagingRecords.map((r, idx) => `
-        <div class="history-item" style="display:flex;flex-wrap:nowrap;gap:10px;align-items:center;padding:0.6rem 0;border-bottom:1px solid #f1f5f9;min-width:max-content;">
-            <select class="dns-stage-type" data-idx="${idx}" ${r.source === 'live' ? 'disabled' : ''} style="width:62px;border:1px solid #e2e8f0;border-radius:6px;padding:0.4rem 0.2rem;font-size:0.8rem;background:${r.source === 'live' ? '#f8fafc' : '#fff'};color:#475569;outline:none;">
+        <div class="history-item" style="min-width: max-content;">
+            <select class="dns-stage-type" data-idx="${idx}" ${r.source === 'live' ? 'disabled' : ''} style="width:70px; padding:0.4rem; font-size:0.85rem; border-radius: var(--radius-md);">
                 <option value="A" ${r.type === 'A' ? 'selected' : ''}>A</option>
                 <option value="AAAA" ${r.type === 'AAAA' ? 'selected' : ''}>AAAA</option>
             </select>
-            <select class="dns-stage-line" data-idx="${idx}" style="width:64px;border:1px solid #e2e8f0;border-radius:6px;padding:0.4rem 0.2rem;font-size:0.8rem;background:#fff;color:#475569;outline:none;">
+            <select class="dns-stage-line" data-idx="${idx}" style="width:75px; padding:0.4rem; font-size:0.85rem; border-radius: var(--radius-md);">
                 <option value="default" ${r.line === 'default' ? 'selected' : ''}>默认</option>
                 <option value="telecom" ${r.line === 'telecom' ? 'selected' : ''}>电信</option>
                 <option value="unicom" ${r.line === 'unicom' ? 'selected' : ''}>联通</option>
                 <option value="mobile" ${r.line === 'mobile' ? 'selected' : ''}>移动</option>
             </select>
-            <input class="dns-stage-value" data-idx="${idx}" value="${r.value}" placeholder="IP (IPv4/IPv6)" style="flex:1;min-width:152px;border:1px solid #e2e8f0;border-radius:6px;padding:0.4rem 0.6rem;font-size:0.85rem;font-family:monospace;color:#1e293b;outline:none;background:#fff;transition:border-color 0.2s;">
-            <button class="dns-stage-del" data-idx="${idx}" style="background:none;border:none;color:#ef4444;cursor:pointer;padding:0.4rem;display:flex;align-items:center;justify-content:center;border-radius:6px;transition:background 0.2s;" onmouseover="this.style.background='#fee2e2'" onmouseout="this.style.background='none'" title="删除记录">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
+            <input class="dns-stage-value" data-idx="${idx}" value="${r.value}" placeholder="IP (IPv4/IPv6)" style="flex:1; min-width:160px; padding:0.4rem 0.6rem; font-family: monospace; font-size:0.9rem;border: 1px solid var(--border-color);border-radius: 4px;">
+            <button class="dns-stage-del" data-idx="${idx}" style="background:none;border:none;color:var(--danger);cursor:pointer;padding:0.4rem;display:flex;align-items:center;justify-content:center;border-radius:var(--radius-md);transition:background 0.2s;" onmouseover="this.style.background='var(--danger-light)'" onmouseout="this.style.background='none'" title="删除记录">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
             </button>
-            <span style="font-size:0.7rem;font-weight:600;padding:0.2rem 0.4rem;border-radius:4px;background:${r.source === 'live' ? '#e0e7ff' : '#dcfce7'};color:${r.source === 'live' ? '#4338ca' : '#16a34a'};width:36px;text-align:center;">${r.source === 'live' ? '线上' : '新增'}</span>
+            <span style="font-size:0.75rem;font-weight:700;padding:0.25rem 0.5rem;border-radius:var(--radius-md);background:${r.source === 'live' ? 'var(--info-light)' : 'var(--success-light)'};color:${r.source === 'live' ? 'var(--info)' : 'var(--success)'};width:46px;text-align:center;">${r.source === 'live' ? '线上' : '新增'}</span>
         </div>
     `).join('');
 
@@ -294,15 +294,14 @@ function renderDnsStagingRows() {
         const idx = Number(el.dataset.idx);
         if (!Number.isFinite(idx) || !dnsStagingRecords[idx]) return;
         dnsStagingRecords[idx].type = String(el.value || 'A').toUpperCase() === 'AAAA' ? 'AAAA' : 'A';
-        await persistDnsStagingRecords();
+        if (dnsStagingRecords[idx].source !== 'live') await persistDnsStagingRecords();
     }));
     document.querySelectorAll('.dns-stage-line').forEach(el => el.addEventListener('change', async () => {
         const idx = Number(el.dataset.idx);
         if (!Number.isFinite(idx) || !dnsStagingRecords[idx]) return;
         const row = dnsStagingRecords[idx];
         row.line = normalizeLineKey(el.value);
-        if (row.source === 'live') await updateLiveDnsRecord(row);
-        else await persistDnsStagingRecords();
+        if (row.source !== 'live') await persistDnsStagingRecords();
     }));
     document.querySelectorAll('.dns-stage-value').forEach(el => el.addEventListener('change', async () => {
         const idx = Number(el.dataset.idx);
@@ -310,14 +309,16 @@ function renderDnsStagingRows() {
         const row = dnsStagingRecords[idx];
         row.value = String(el.value || '').trim();
         if (!row.value) return;
-        if (row.source === 'live') await updateLiveDnsRecord(row);
-        else await persistDnsStagingRecords();
+        if (row.source !== 'live') await persistDnsStagingRecords();
     }));
     document.querySelectorAll('.dns-stage-del').forEach(btn => btn.addEventListener('click', async () => {
         const idx = Number(btn.dataset.idx);
         if (!Number.isFinite(idx)) return;
         const row = dnsStagingRecords[idx];
         if (!row) return;
+        
+        if (!confirm(`确定要删除此记录吗？\nIP: ${row.value || '空'} (${row.line})`)) return;
+
         if (row.source === 'live') {
             try {
                 const delRes = await fetch(`/api/cf/dns/${row.id}`, { method: 'DELETE' });
@@ -331,22 +332,12 @@ function renderDnsStagingRows() {
         await persistDnsStagingRecords();
         renderDnsStagingRows();
     }));
+
+    initCustomSelects(dnsStagingList);
 }
 
 async function updateLiveDnsRecord(row) {
-    try {
-        const res = await fetch(`/api/cf/dns/${row.id}/update`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ip: row.value, line: row.line })
-        });
-        const json = await res.json();
-        if (!json.success) return showToast(`❌ 更新失败: ${json.msg || '未知错误'}`);
-        showToast('✅ 已更新');
-        await loadDnsStaging();
-    } catch (_) {
-        showToast('❌ 网络错误');
-    }
+    // Deprecated: live records are now updated in batch via publishDnsBtn
 }
 
 async function persistDnsStagingRecords() {
@@ -408,14 +399,50 @@ syncCfBtn?.addEventListener('click', () => {
 });
 
 publishDnsBtn?.addEventListener('click', async () => {
-    const records = (await loadDnsStaging()).filter(r => r.source !== 'live');
-    if (!records.length) return showToast('❌ 没有新增记录可发布');
-    if (!confirm(`确认将 ${records.length} 条新增记录提交到腾讯 DNS？`)) return;
-    await syncToCloudflare(records.map(r => ({ type: r.type, line: r.line, value: r.value })));
-    try {
-        await fetch('/api/dns/staging', { method: 'DELETE' });
-        await loadDnsStaging();
-    } catch (e) {}
+    const originalRecords = await loadDnsStaging();
+    const liveRecordsToUpdate = dnsStagingRecords.filter(r => r.source === 'live');
+    const stagingRecordsToAdd = dnsStagingRecords.filter(r => r.source !== 'live');
+    
+    const updates = [];
+    for (const r of liveRecordsToUpdate) {
+        const original = originalRecords.find(o => o.id === r.id);
+        if (original && (original.value !== r.value || original.line !== r.line)) {
+            updates.push(r);
+        }
+    }
+
+    if (!stagingRecordsToAdd.length && !updates.length) {
+        return showToast('❌ 没有需要保存的变更');
+    }
+
+    let msg = '确认保存以下更改到腾讯 DNS？\n';
+    if (stagingRecordsToAdd.length) msg += `- 新增 ${stagingRecordsToAdd.length} 条记录\n`;
+    if (updates.length) msg += `- 修改 ${updates.length} 条线上记录\n`;
+    
+    if (!confirm(msg)) return;
+
+    if (updates.length > 0) {
+        for (const r of updates) {
+            try {
+                await fetch(`/api/cf/dns/${r.id}/update`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ip: r.value, line: r.line })
+                });
+            } catch (e) {}
+        }
+    }
+
+    if (stagingRecordsToAdd.length > 0) {
+        await syncToCloudflare(stagingRecordsToAdd.map(r => ({ type: r.type, line: r.line, value: r.value })));
+        try {
+            await fetch('/api/dns/staging', { method: 'DELETE' });
+        } catch (e) {}
+    } else {
+        showToast('✅ 线上记录已保存');
+    }
+    
+    await loadDnsStaging();
 });
 
 clearStagingBtn?.addEventListener('click', async () => {
@@ -732,7 +759,7 @@ async function loadCfstConfig() {
         const res = await fetch(`/api/settings/cfst?_=${Date.now()}`); const json = await res.json();
         if (json.success) {
             const c = json.data; 
-            if(cfstMode) cfstMode.value = c.mode||'tcp'; 
+            if(cfstMode) { cfstMode.value = c.mode||'tcp'; cfstMode.dispatchEvent(new Event('change')); }
             if(cfstHttpingCodeInput) cfstHttpingCodeInput.value = c.httpingCode ?? '';
             if(cfstCfcoloInput) cfstCfcoloInput.value = c.cfcolo || '';
             if(cfstUrlInput) cfstUrlInput.value = c.url||'';
@@ -795,7 +822,121 @@ resetSettingsBtn?.addEventListener('click', async () => {
     try { const res = await fetch('/api/settings/cfst/reset', { method: 'POST' }); if ((await res.json()).success) { loadCfstConfig(); showToast('✅ 已恢复官方推荐设置'); } } catch (e) {}
 });
 
-if(themeMode) { themeMode.value = localStorage.getItem('theme') || 'system'; applyTheme(themeMode.value); }
+if(themeMode) { themeMode.value = localStorage.getItem('theme') || 'system'; applyTheme(themeMode.value); themeMode.dispatchEvent(new Event('change')); }
 loadCfApiConfig();
 loadCfstConfig();
 renderTable(testTableData, '准备就绪，点击底部按钮开始测速');
+initCustomSelects();
+
+function initCustomSelects(container = document) {
+    const selects = container.querySelectorAll('select:not(.custom-select-hidden)');
+    selects.forEach(select => {
+        const originalClasses = Array.from(select.classList).join(' ');
+        select.classList.add('custom-select-hidden');
+        select.style.display = 'none';
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'custom-select-wrapper';
+        if (select.style.width) wrapper.style.width = select.style.width;
+        if (select.style.flex) wrapper.style.flex = select.style.flex;
+
+        if (select.parentNode) {
+            select.parentNode.insertBefore(wrapper, select);
+            wrapper.appendChild(select);
+        }
+
+        const trigger = document.createElement('div');
+        trigger.className = `custom-select-trigger ${originalClasses} ${select.disabled ? 'disabled' : ''}`;
+        
+        const valueSpan = document.createElement('span');
+        valueSpan.className = 'custom-select-value';
+        
+        const updateValueText = () => {
+            const selectedOption = select.options[select.selectedIndex];
+            valueSpan.innerText = selectedOption ? selectedOption.text : '';
+        };
+        updateValueText();
+
+        const arrowSvg = document.createElement('div');
+        arrowSvg.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>`;
+        arrowSvg.className = 'custom-select-arrow';
+
+        trigger.appendChild(valueSpan);
+        trigger.appendChild(arrowSvg);
+        wrapper.appendChild(trigger);
+
+        const optionsContainer = document.createElement('div');
+        optionsContainer.className = 'custom-select-options';
+
+        const renderOptions = () => {
+            optionsContainer.innerHTML = '';
+            Array.from(select.children).forEach(child => {
+                if (child.tagName.toLowerCase() === 'optgroup') {
+                    const groupTitle = document.createElement('div');
+                    groupTitle.className = 'custom-select-optgroup';
+                    groupTitle.innerText = child.label;
+                    optionsContainer.appendChild(groupTitle);
+                    
+                    Array.from(child.children).forEach(opt => {
+                        optionsContainer.appendChild(createOptionEl(opt));
+                    });
+                } else if (child.tagName.toLowerCase() === 'option') {
+                    optionsContainer.appendChild(createOptionEl(child));
+                }
+            });
+        };
+
+        const createOptionEl = (option) => {
+            const optEl = document.createElement('div');
+            optEl.className = `custom-select-option ${option.selected ? 'selected' : ''}`;
+            optEl.dataset.value = option.value;
+            
+            optEl.innerHTML = `<span class="opt-text">${option.text}</span>`;
+            
+            optEl.addEventListener('click', (e) => {
+                e.stopPropagation();
+                if (select.value !== option.value) {
+                    select.value = option.value;
+                    select.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                closeAllCustomSelects();
+            });
+            return optEl;
+        };
+
+        renderOptions();
+        wrapper.appendChild(optionsContainer);
+
+        select.addEventListener('change', () => {
+            updateValueText();
+            renderOptions();
+        });
+
+        trigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (select.disabled) return;
+            const isOpen = optionsContainer.classList.contains('open');
+            closeAllCustomSelects();
+            if (!isOpen) {
+                optionsContainer.classList.add('open');
+                trigger.classList.add('active');
+                
+                const rect = optionsContainer.getBoundingClientRect();
+                if (rect.bottom > window.innerHeight) {
+                    optionsContainer.style.top = 'auto';
+                    optionsContainer.style.bottom = 'calc(100% + 0.25rem)';
+                } else {
+                    optionsContainer.style.top = 'calc(100% + 0.25rem)';
+                    optionsContainer.style.bottom = 'auto';
+                }
+            }
+        });
+    });
+}
+
+function closeAllCustomSelects() {
+    document.querySelectorAll('.custom-select-options.open').forEach(el => el.classList.remove('open'));
+    document.querySelectorAll('.custom-select-trigger.active').forEach(el => el.classList.remove('active'));
+}
+
+document.addEventListener('click', closeAllCustomSelects);
