@@ -1,10 +1,10 @@
 $ErrorActionPreference = "Stop"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 
-function Write-Info($msg) { Write-Host "▶ $msg" -ForegroundColor Cyan }
-function Write-Ok($msg) { Write-Host "✔ $msg" -ForegroundColor Green }
-function Write-Warn($msg) { Write-Host "⚠ $msg" -ForegroundColor Yellow }
-function Write-Fail($msg) { Write-Host "✘ $msg" -ForegroundColor Red }
+function Write-Info($msg) { Write-Host "[INFO] $msg" -ForegroundColor Cyan }
+function Write-Ok($msg) { Write-Host "[ OK ] $msg" -ForegroundColor Green }
+function Write-Warn($msg) { Write-Host "[WARN] $msg" -ForegroundColor Yellow }
+function Write-Fail($msg) { Write-Host "[FAIL] $msg" -ForegroundColor Red }
 
 $RepoUrl = "https://github.com/Amour795/cfst-web-panel.git"
 $RepoZipUrl = "https://github.com/Amour795/cfst-web-panel/archive/refs/heads/main.zip"
@@ -20,64 +20,64 @@ function Test-Command($name) {
 function Ensure-Git {
     if (Test-Command "git") {
         $script:HasGit = $true
-        Write-Ok "检测到 git，使用 git 模式安装/更新"
+        Write-Ok "Git detected, using git mode."
     } else {
         $script:HasGit = $false
-        Write-Warn "未检测到 git，将自动切换为 ZIP 安装模式（可正常安装，但后续更新能力较弱）"
+        Write-Warn "Git not found, fallback to ZIP mode."
     }
 }
 
 function Ensure-Node {
     if (-not (Test-Command "node")) {
-        Write-Fail "未检测到 Node.js，请先安装 Node.js >= 18 后重试。"
-        Write-Host "下载地址: https://nodejs.org/" -ForegroundColor DarkYellow
+        Write-Fail "Node.js not found. Please install Node.js >= 18 first."
+        Write-Host "Download: https://nodejs.org/" -ForegroundColor DarkYellow
         exit 1
     }
     $v = (node -v).Trim()
     if ($v -notmatch "^v(\d+)") {
-        Write-Fail "无法识别 Node.js 版本: $v"
+        Write-Fail "Cannot parse Node.js version: $v"
         exit 1
     }
     $major = [int]$Matches[1]
     if ($major -lt $MinNodeMajor) {
-        Write-Fail "Node.js 版本过低: $v，要求 >= $MinNodeMajor"
+        Write-Fail "Node.js version too low: $v, need >= $MinNodeMajor"
         exit 1
     }
-    Write-Ok "Node.js 版本可用: $v"
+    Write-Ok "Node.js version ok: $v"
 }
 
 function Update-Code {
     if ($script:HasGit) {
         if (Test-Path $ProjectDir) {
-            Write-Info "检测到已存在目录，执行更新..."
+            Write-Info "Project exists, updating..."
             Push-Location $ProjectDir
             git fetch --all --prune | Out-Null
             git pull --ff-only origin main
             Pop-Location
-            Write-Ok "代码更新完成"
+            Write-Ok "Code updated."
         } else {
-            Write-Info "克隆项目..."
+            Write-Info "Cloning project..."
             git clone $RepoUrl $ProjectDir
-            Write-Ok "代码克隆完成"
+            Write-Ok "Project cloned."
         }
     } else {
         if (Test-Path $ProjectDir) {
-            Write-Warn "检测到已存在目录：$ProjectDir"
-            Write-Warn "ZIP 模式不会自动合并更新，保留现有目录继续安装依赖与引擎。"
+            Write-Warn "Project directory already exists: $ProjectDir"
+            Write-Warn "ZIP mode keeps current files and continues."
             return
         }
-        Write-Info "下载项目 ZIP 包..."
+        Write-Info "Downloading project ZIP..."
         if (Test-Path ".\tmp_repo.zip") { Remove-Item -Force ".\tmp_repo.zip" }
         if (Test-Path ".\$ProjectExtractedDir") { Remove-Item -Recurse -Force ".\$ProjectExtractedDir" }
         Invoke-WebRequest -UseBasicParsing -Uri $RepoZipUrl -OutFile ".\tmp_repo.zip" -TimeoutSec 30
         Expand-Archive -Path ".\tmp_repo.zip" -DestinationPath "." -Force
         Remove-Item -Force ".\tmp_repo.zip"
         if (-not (Test-Path ".\$ProjectExtractedDir")) {
-            Write-Fail "ZIP 解压失败，未找到目录：$ProjectExtractedDir"
+            Write-Fail "ZIP extract failed, missing folder: $ProjectExtractedDir"
             exit 1
         }
         Rename-Item -Path ".\$ProjectExtractedDir" -NewName $ProjectDir
-        Write-Ok "ZIP 模式项目下载完成"
+        Write-Ok "ZIP download completed."
     }
 }
 
@@ -92,54 +92,53 @@ function Download-Engine {
     $ok = $false
     foreach ($u in $urls) {
         try {
-            Write-Info "尝试下载测速引擎: $u"
+            Write-Info "Downloading engine from: $u"
             Invoke-WebRequest -UseBasicParsing -Uri $u -OutFile ".\tmp_cfst.zip" -TimeoutSec 30
             $ok = $true
             break
         } catch {
-            Write-Warn "下载失败，切换下一个下载源"
+            Write-Warn "Download failed, trying next mirror..."
         }
     }
     if (-not $ok) {
         Pop-Location
-        Write-Fail "引擎下载失败，请检查网络后重试。"
+        Write-Fail "Engine download failed."
         exit 1
     }
     Expand-Archive -Path ".\tmp_cfst.zip" -DestinationPath "." -Force
     Remove-Item -Force ".\tmp_cfst.zip"
     if (-not (Test-Path ".\cfst.exe")) {
         Pop-Location
-        Write-Fail "解压后未找到 cfst.exe，请手动检查压缩包内容。"
+        Write-Fail "cfst.exe not found after extract."
         exit 1
     }
     Pop-Location
-    Write-Ok "测速引擎更新完成"
+    Write-Ok "Engine ready."
 }
 
 function Install-Dependencies {
     Push-Location $ProjectDir
-    Write-Info "安装 Node 依赖..."
+    Write-Info "Installing npm dependencies..."
     npm install --no-fund --no-audit
-    Write-Info "构建前端压缩文件..."
+    Write-Info "Building min.js..."
     npm run build:min
     Pop-Location
-    Write-Ok "依赖安装与构建完成"
+    Write-Ok "Dependencies installed and build done."
 }
 
 function Start-Server {
     Push-Location $ProjectDir
     Write-Host ""
-    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Blue
-    Write-Host "启动服务中..." -ForegroundColor Magenta
-    Write-Host "默认访问: http://localhost:3088" -ForegroundColor Green
-    Write-Host "若端口被占用，请以终端实际输出为准" -ForegroundColor DarkGray
-    Write-Host "按 Ctrl + C 可停止服务" -ForegroundColor DarkGray
-    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor Blue
+    Write-Host "========================================" -ForegroundColor Blue
+    Write-Host "Starting server..." -ForegroundColor Magenta
+    Write-Host "Default URL: http://localhost:3088" -ForegroundColor Green
+    Write-Host "Press Ctrl + C to stop." -ForegroundColor DarkGray
+    Write-Host "========================================" -ForegroundColor Blue
     node .\server.js
     Pop-Location
 }
 
-Write-Host "⚡ CFST Web Panel Windows 安装向导" -ForegroundColor Magenta
+Write-Host "CFST Web Panel Windows Installer" -ForegroundColor Magenta
 Ensure-Git
 Ensure-Node
 Update-Code
