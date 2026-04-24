@@ -236,7 +236,8 @@ async function loadDnsStaging() {
             source: 'staging',
             type: String(item?.type || 'A').toUpperCase() === 'AAAA' ? 'AAAA' : 'A',
             line: normalizeLineKey(item?.line),
-            value: String(item?.value || item?.ip || '').trim()
+            value: String(item?.value || item?.ip || '').trim(),
+            ttl: item?.ttl ? Number(item.ttl) : 600
         })).filter(r => r.value);
 
         const liveRows = (Array.isArray(liveRes?.data) ? liveRes.data : []).map(item => ({
@@ -244,7 +245,8 @@ async function loadDnsStaging() {
             id: item.id,
             type: String(item?.type || 'A').toUpperCase() === 'AAAA' ? 'AAAA' : 'A',
             line: lineTextToKey(item?.line),
-            value: String(item?.content || item?.value || '').trim()
+            value: String(item?.content || item?.value || '').trim(),
+            ttl: item?.ttl ? Number(item.ttl) : 600
         })).filter(r => r.value);
 
         const seen = new Set();
@@ -275,7 +277,7 @@ function renderDnsStagingRows() {
     }
     dnsStagingList.innerHTML = dnsStagingRecords.map((r, idx) => `
         <div class="history-item" style="min-width: max-content;">
-            <select class="dns-stage-type" data-idx="${idx}" ${r.source === 'live' ? 'disabled' : ''} style="width:70px; padding:0.4rem; font-size:0.85rem; border-radius: var(--radius-md);">
+            <select class="dns-stage-type" data-idx="${idx}" ${r.source === 'live' ? 'disabled' : ''} style="width:80px; padding:0.4rem; font-size:0.85rem; border-radius: var(--radius-md);">
                 <option value="A" ${r.type === 'A' ? 'selected' : ''}>A</option>
                 <option value="AAAA" ${r.type === 'AAAA' ? 'selected' : ''}>AAAA</option>
             </select>
@@ -284,6 +286,10 @@ function renderDnsStagingRows() {
                 <option value="telecom" ${r.line === 'telecom' ? 'selected' : ''}>电信</option>
                 <option value="unicom" ${r.line === 'unicom' ? 'selected' : ''}>联通</option>
                 <option value="mobile" ${r.line === 'mobile' ? 'selected' : ''}>移动</option>
+            </select>
+            <select class="dns-stage-ttl" data-idx="${idx}" style="width:80px; padding:0.4rem; font-size:0.85rem; border-radius: var(--radius-md);">
+                <option value="60" ${r.ttl === 60 ? 'selected' : ''}>60s</option>
+                <option value="600" ${r.ttl === 600 ? 'selected' : ''}>600s</option>
             </select>
             <input class="dns-stage-value" data-idx="${idx}" value="${r.value}" placeholder="IP (IPv4/IPv6)" style="flex:1; min-width:160px; padding:0.4rem 0.6rem; font-family: monospace; font-size:0.9rem;border: 1px solid var(--border-color);border-radius: 4px;background: var(--input-bg);color: var(--text-primary);">
             <button class="dns-stage-del" data-idx="${idx}" style="background:none;border:none;color:var(--danger);cursor:pointer;padding:0.4rem;display:flex;align-items:center;justify-content:center;border-radius:var(--radius-md);transition:background 0.2s;" onmouseover="this.style.background='var(--danger-light)'" onmouseout="this.style.background='none'" title="删除记录">
@@ -304,6 +310,13 @@ function renderDnsStagingRows() {
         if (!Number.isFinite(idx) || !dnsStagingRecords[idx]) return;
         const row = dnsStagingRecords[idx];
         row.line = normalizeLineKey(el.value);
+        if (row.source !== 'live') await persistDnsStagingRecords();
+    }));
+    document.querySelectorAll('.dns-stage-ttl').forEach(el => el.addEventListener('change', async () => {
+        const idx = Number(el.dataset.idx);
+        if (!Number.isFinite(idx) || !dnsStagingRecords[idx]) return;
+        const row = dnsStagingRecords[idx];
+        row.ttl = Number(el.value) === 60 ? 60 : 600;
         if (row.source !== 'live') await persistDnsStagingRecords();
     }));
     document.querySelectorAll('.dns-stage-value').forEach(el => el.addEventListener('change', async () => {
@@ -347,7 +360,8 @@ async function persistDnsStagingRecords() {
     const records = dnsStagingRecords.map(r => ({
         type: r.type === 'AAAA' ? 'AAAA' : 'A',
         line: normalizeLineKey(r.line),
-        value: String(r.value || '').trim()
+        value: String(r.value || '').trim(),
+        ttl: r.ttl === 60 ? 60 : 600
     })).filter(r => r.value && r.source !== 'live');
     await fetch('/api/dns/staging', {
         method: 'PUT',
@@ -357,7 +371,7 @@ async function persistDnsStagingRecords() {
 }
 
 addDnsRowBtn?.addEventListener('click', async () => {
-    dnsStagingRecords.push({ source: 'staging', type: 'A', line: 'default', value: '' });
+    dnsStagingRecords.push({ source: 'staging', type: 'A', line: 'default', value: '', ttl: 600 });
     renderDnsStagingRows();
 });
 
@@ -388,7 +402,8 @@ syncCfBtn?.addEventListener('click', () => {
     const records = selectedIps.map(ip => ({
         type: String(ip || '').includes(':') ? 'AAAA' : 'A',
         line: 'default',
-        value: String(ip || '').trim()
+        value: String(ip || '').trim(),
+        ttl: 600
     }));
     fetch('/api/dns/staging', {
         method: 'POST',
@@ -409,7 +424,7 @@ publishDnsBtn?.addEventListener('click', async () => {
     const updates = [];
     for (const r of liveRecordsToUpdate) {
         const original = originalRecords.find(o => o.id === r.id);
-        if (original && (original.value !== r.value || original.line !== r.line)) {
+        if (original && (original.value !== r.value || original.line !== r.line || original.ttl !== r.ttl)) {
             updates.push(r);
         }
     }
@@ -430,14 +445,14 @@ publishDnsBtn?.addEventListener('click', async () => {
                 await fetch(`/api/cf/dns/${r.id}/update`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ ip: r.value, line: r.line })
+                    body: JSON.stringify({ ip: r.value, line: r.line, ttl: r.ttl })
                 });
             } catch (e) {}
         }
     }
 
     if (stagingRecordsToAdd.length > 0) {
-        await syncToCloudflare(stagingRecordsToAdd.map(r => ({ type: r.type, line: r.line, value: r.value })));
+        await syncToCloudflare(stagingRecordsToAdd.map(r => ({ type: r.type, line: r.line, value: r.value, ttl: r.ttl })));
         try {
             await fetch('/api/dns/staging', { method: 'DELETE' });
         } catch (e) {}
