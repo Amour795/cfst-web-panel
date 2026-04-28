@@ -51,6 +51,7 @@ const addDnsRowBtn = document.getElementById('add-dns-row-btn');
 const publishDnsBtn = document.getElementById('publish-dns-btn');
 const clearStagingBtn = document.getElementById('clear-staging-btn');
 let dnsStagingRecords = [];
+
 function normalizeLineKey(v) { return ['default', 'telecom', 'unicom', 'mobile'].includes(String(v || '').toLowerCase()) ? String(v).toLowerCase() : 'default'; }
 function lineTextToKey(lineText) {
     const t = String(lineText || '').trim();
@@ -95,12 +96,6 @@ let progressSource = null;
 let progressPollTimer = null;
 let currentTaskId = '';
 const TABLE_COLSPAN = 7;
-
-// --- 双栈 IPv4 + IPv6 支持 ---
-const ipv4Str = '(?:(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)\\.){3}(?:25[0-5]|2[0-4]\\d|[01]?\\d\\d?)';
-const ipv6Str = '(?:(?:[0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:|(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}|(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}|(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}|(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:(?:(?::[0-9a-fA-F]{1,4}){1,6})|:(?:(?::[0-9a-fA-F]{1,4}){1,7}|:))';
-const ipRegexGlobal = new RegExp(`(?:${ipv4Str})|(?:${ipv6Str})`, 'g');
-const mixedRegex = new RegExp(`(?:${ipv4Str})|(?:${ipv6Str})|(?:[a-zA-Z0-9][-a-zA-Z0-9]{0,62}\\.)+[a-zA-Z]{2,}`, 'g');
 
 const isoMap = {
     'HKG': 'HK', '香港': 'HK', 'TPE': 'TW', '台北': 'TW', '台湾': 'TW', 'NRT': 'JP', 'KIX': 'JP', '东京': 'JP', '大阪': 'JP', '日本': 'JP',
@@ -178,7 +173,6 @@ function switchTab(view) {
         renderTable(testTableData, '准备就绪，点击底部按钮开始测速');
     }
     
-    // Save current view to localStorage
     localStorage.setItem('currentView', view);
 }
 tabTest?.addEventListener('click', () => { if(currentView !== 'test') switchTab('test'); });
@@ -348,10 +342,6 @@ function renderDnsStagingRows() {
     initCustomSelects(dnsStagingList);
 }
 
-async function updateLiveDnsRecord(row) {
-    // Deprecated: live records are now updated in batch via publishDnsBtn
-}
-
 async function persistDnsStagingRecords() {
     const records = dnsStagingRecords.map(r => ({
         type: r.type === 'AAAA' ? 'AAAA' : 'A',
@@ -371,25 +361,6 @@ addDnsRowBtn?.addEventListener('click', async () => {
     renderDnsStagingRows();
 });
 
-async function syncToCloudflare(records) {
-    if(!syncCfBtn) return;
-    const oldText = syncCfBtn.innerText;
-    syncCfBtn.innerText = '📡 推送中...'; syncCfBtn.disabled = true;
-    try {
-        const res = await fetch('/api/cf/dns/sync', {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ records, replaceAll: false })
-        });
-        const json = await res.json();
-        if (json.success) {
-            showToast(`✅ 新增 ${json.added || 0} 条，跳过 ${json.skipped || 0} 条`);
-            if (currentView === 'dns') loadDnsStaging();
-        }
-        else showToast(`❌ 同步失败: ${json.msg}`);
-    } catch (e) { showToast('❌ 网络错误'); }
-    finally { syncCfBtn.innerText = oldText; updateSelectionState(); }
-}
 syncCfBtn?.addEventListener('click', () => {
     if (!resultBody) return;
     const selectedIps = Array.from(resultBody.querySelectorAll('.ip-checkbox:checked')).map(cb => cb.dataset.ip);
@@ -502,15 +473,52 @@ function updateProgressUI(payload) {
     if ((payload.state === 'done' || payload.state === 'error') && loadingSpinner) loadingSpinner.style.display = 'none';
 }
 
+// 核心修复1：极其健壮的高性能正则引擎，防卡死、防脏数据(带端口的假域名)
 function extractAndUpdateInput(text) {
-    console.log(text);
-    
     const isCname = allowCnameInput?.checked || false;
-    const matcher = isCname ? mixedRegex : ipRegexGlobal;
-    parsedTargets = [...new Set(String(text || '').match(matcher) || [])];
-    if(ipCount) ipCount.innerText = parsedTargets.length;
-    if(ipInput) ipInput.value = isCname && parsedTargets.length === 0 ? text : parsedTargets.join('\n');
+    const uniqueTargets = new Set();
+    
+    // 严格精确匹配正则
+    const ipv4Exact = /^((25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(25[0-5]|2[0-4]\d|[01]?\d\d?)$/;
+    const ipv6Exact = /^([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:)$/;
+    const domainExact = /^([a-zA-Z0-9][-a-zA-Z0-9]{0,62}\.)+[a-zA-Z]{2,}$/;
+
+    // 用空白和各种常见标点拆分
+    const rawTokens = String(text || '').split(/[\s,"'#<>|]+/);
+
+    for (let token of rawTokens) {
+        token = token.trim();
+        if (!token) continue;
+        
+        // 剥离 IPv6 括号及端口
+        token = token.replace(/^\[|\](:\d+)?$/g, '');
+        
+        // 剥离 IPv4 或域名的端口
+        if (token.includes(':') && !token.includes('::')) {
+            const parts = token.split(':');
+            if (parts.length === 2 && /^\d+$/.test(parts[1])) {
+                token = parts[0];
+            }
+        }
+
+        if (ipv4Exact.test(token) || ipv6Exact.test(token)) {
+            uniqueTargets.add(token);
+        } else if (isCname && domainExact.test(token)) {
+            // 防御由纯数字组成的假域名
+            if (!/^\d+$/.test(token.replace(/\./g, ''))) {
+                uniqueTargets.add(token);
+            }
+        }
+
+        // 最高保护：提取数量到达 10 万自动截断，防止浏览器内存崩盘
+        if (uniqueTargets.size >= 100000) break;
+    }
+
+    parsedTargets = Array.from(uniqueTargets);
+    if (ipCount) ipCount.innerText = parsedTargets.length;
+    if (ipInput) ipInput.value = parsedTargets.join('\n');
 }
+
 ipInput?.addEventListener('blur', () => extractAndUpdateInput(ipInput.value));
 clearInputBtn?.addEventListener('click', () => { if(ipInput) ipInput.value = ''; parsedTargets = []; if(ipCount) ipCount.innerText = '0'; });
 allowCnameInput?.addEventListener('change', () => extractAndUpdateInput(ipInput?.value));
@@ -523,6 +531,7 @@ sourceUrlPreset?.addEventListener('change', () => {
     }
 });
 
+// 核心修复2：拉取源时数据完美累加
 fetchSourceBtn?.addEventListener('click', async () => {
     const url = sourceUrlInput?.value.trim(); if (!url) return showToast('❌ 请输入 URL');
     if(fetchSourceBtn) { fetchSourceBtn.disabled = true; fetchSourceBtn.innerText = '拉取中...'; }
@@ -531,12 +540,14 @@ fetchSourceBtn?.addEventListener('click', async () => {
         const json = await res.json();
         if (json.success) {
             const append = fetchAppend?.checked ?? true;
+            // 通过 \n 拼合新老数据，再交由 extractAndUpdateInput 清理，彻底解决丢数据问题
             const nextText = append ? [ipInput?.value, json.data].filter(Boolean).join('\n') : json.data;
             extractAndUpdateInput(nextText);
             showToast(`✅ 成功拉取`);
         }
     } finally { if(fetchSourceBtn) { fetchSourceBtn.disabled = false; fetchSourceBtn.innerText = '🌐 拉取源'; } }
 });
+
 importCsvBtn?.addEventListener('click', () => fileInput?.click());
 fileInput?.addEventListener('change', (e) => {
     if (!e.target.files[0]) return;
@@ -720,7 +731,7 @@ startBtn?.addEventListener('click', async () => {
     const targetIps = currentView === 'favorites'
         ? Array.from((resultBody?.querySelectorAll('.ip-checkbox:checked') || [])).map(cb => cb.dataset.ip)
         : parsedTargets;
-    if (currentView === 'favorites' && targetIps.length === 0) { throw new Error("请先选择要测速的 IP"); }
+    if (currentView === 'favorites' && targetIps.length === 0) { showToast("❌ 请先选择要测速的 IP"); return; }
 
     startBtn.innerText = '⏹ 停止测试';
     startBtn.style.backgroundColor = '#ef4444';
@@ -850,8 +861,8 @@ if (savedView !== 'test') {
     renderTable(testTableData, '准备就绪，点击底部按钮开始测速');
 }
 
-initCustomSelects();
 
+// 核心修复3：统一PC与H5的下拉框 UI，并加入视口边缘自动适配检测（绝不越界）
 function initCustomSelects(container = document) {
     const selects = container.querySelectorAll('select:not(.custom-select-hidden)');
     selects.forEach(select => {
@@ -941,6 +952,7 @@ function initCustomSelects(container = document) {
             if (select.disabled) return;
             const isOpen = optionsContainer.classList.contains('open');
             closeAllCustomSelects();
+            
             if (!isOpen) {
                 optionsContainer.classList.add('open');
                 trigger.classList.add('active');
@@ -948,37 +960,54 @@ function initCustomSelects(container = document) {
                 
                 const triggerRect = trigger.getBoundingClientRect();
                 
-                // Position optionsContainer before calculating its height
-                optionsContainer.style.width = Math.max(triggerRect.width, optionsContainer.offsetWidth) + 'px';
-                optionsContainer.style.left = triggerRect.left + 'px';
+                // 解决 H5/PC 横向越界：动态计算宽度和 Left 位置
+                let optWidth = Math.max(triggerRect.width, optionsContainer.offsetWidth);
+                if (optWidth > window.innerWidth - 20) {
+                    optWidth = window.innerWidth - 20; // 防止比屏幕还宽
+                }
+                optionsContainer.style.width = optWidth + 'px';
                 
-                // Ensure options are rendered into DOM before calculation
-                const rect = optionsContainer.getBoundingClientRect();
+                let optLeft = triggerRect.left;
+                if (optLeft + optWidth > window.innerWidth) {
+                    optLeft = window.innerWidth - optWidth - 10; // 靠右对齐并留边距
+                }
+                optionsContainer.style.left = Math.max(10, optLeft) + 'px'; // 保证最左边距
                 
-                if (triggerRect.bottom + rect.height > window.innerHeight && triggerRect.top > rect.height) {
-                    // Open upwards
-                    optionsContainer.style.top = (triggerRect.top - rect.height - 4) + 'px';
+                // 解决纵向越界：智能判断是向上展开还是向下展开
+                // 先临时显示以获取真实高度
+                optionsContainer.style.visibility = 'hidden';
+                optionsContainer.style.display = 'block';
+                const optHeight = optionsContainer.scrollHeight;
+                optionsContainer.style.visibility = '';
+                optionsContainer.style.display = '';
+
+                if (triggerRect.bottom + Math.min(optHeight, 280) > window.innerHeight && triggerRect.top > Math.min(optHeight, 280)) {
+                    // 屏幕下方空间不够，改为向上展开
+                    optionsContainer.style.top = (triggerRect.top - Math.min(optHeight, 280) - 4) + 'px';
                 } else {
-                    // Open downwards
+                    // 正常向下展开
                     optionsContainer.style.top = (triggerRect.bottom + 4) + 'px';
                 }
             }
         });
         
-        // Ensure options container moves with scroll or resize
+        // 滚动时动态刷新位置防止漂移脱节
         window.addEventListener('scroll', () => {
              if(optionsContainer.classList.contains('open')) {
                   const triggerRect = trigger.getBoundingClientRect();
-                  const rect = optionsContainer.getBoundingClientRect();
-                  optionsContainer.style.left = triggerRect.left + 'px';
-                  if (triggerRect.bottom + rect.height > window.innerHeight && triggerRect.top > rect.height) {
-                      optionsContainer.style.top = (triggerRect.top - rect.height - 4) + 'px';
+                  let optWidth = parseInt(optionsContainer.style.width);
+                  let optLeft = triggerRect.left;
+                  if (optLeft + optWidth > window.innerWidth) { optLeft = window.innerWidth - optWidth - 10; }
+                  optionsContainer.style.left = Math.max(10, optLeft) + 'px';
+                  
+                  const optHeight = optionsContainer.scrollHeight;
+                  if (triggerRect.bottom + Math.min(optHeight, 280) > window.innerHeight && triggerRect.top > Math.min(optHeight, 280)) {
+                      optionsContainer.style.top = (triggerRect.top - Math.min(optHeight, 280) - 4) + 'px';
                   } else {
                       optionsContainer.style.top = (triggerRect.bottom + 4) + 'px';
                   }
              }
         }, true);
-        window.addEventListener('resize', closeAllCustomSelects);
     });
 }
 
@@ -988,3 +1017,7 @@ function closeAllCustomSelects() {
 }
 
 document.addEventListener('click', closeAllCustomSelects);
+window.addEventListener('resize', closeAllCustomSelects);
+
+// 取消 DOMContentLoaded 延迟，直接同步执行以保证立刻渲染自定义组件
+initCustomSelects();
