@@ -18,6 +18,7 @@ const clearInputBtn = document.getElementById('clear-input-btn');
 const sourceUrlPreset = document.getElementById('source-url-preset');
 const sourceUrlInput = document.getElementById('source-url-input');
 const fetchSourceBtn = document.getElementById('fetch-source-btn');
+const fetchAppend = document.getElementById('fetch-append');
 
 const startBtn = document.getElementById('start-btn');
 const statusPanel = document.getElementById('status-panel');
@@ -502,6 +503,8 @@ function updateProgressUI(payload) {
 }
 
 function extractAndUpdateInput(text) {
+    console.log(text);
+    
     const isCname = allowCnameInput?.checked || false;
     const matcher = isCname ? mixedRegex : ipRegexGlobal;
     parsedTargets = [...new Set(String(text || '').match(matcher) || [])];
@@ -516,6 +519,7 @@ sourceUrlPreset?.addEventListener('change', () => {
     const val = sourceUrlPreset.value;
     if (val !== 'custom') {
         if(sourceUrlInput) sourceUrlInput.value = val;
+        fetchSourceBtn?.click();
     }
 });
 
@@ -525,7 +529,12 @@ fetchSourceBtn?.addEventListener('click', async () => {
     try {
         const res = await fetch('/api/fetch-source', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
         const json = await res.json();
-        if (json.success) { extractAndUpdateInput([ipInput?.value, json.data].filter(Boolean).join('\n')); showToast(`✅ 成功拉取`); }
+        if (json.success) {
+            const append = fetchAppend?.checked ?? true;
+            const nextText = append ? [ipInput?.value, json.data].filter(Boolean).join('\n') : json.data;
+            extractAndUpdateInput(nextText);
+            showToast(`✅ 成功拉取`);
+        }
     } finally { if(fetchSourceBtn) { fetchSourceBtn.disabled = false; fetchSourceBtn.innerText = '🌐 拉取源'; } }
 });
 importCsvBtn?.addEventListener('click', () => fileInput?.click());

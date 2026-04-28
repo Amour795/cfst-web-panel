@@ -219,24 +219,49 @@
                 <div class="source-fetch">
                     <select id="source-url-preset">
                         <option value="custom">拉取源预设（自定义）</option>
-                        <optgroup label="热门优选库 (高可用)">
-                            <option value="https://api.uouin.com/cloudflare.html">麒麟 CF 优选（uouin）</option>
-                            <option value="https://raw.githubusercontent.com/ymyuuu/IPDB/main/bestcf.txt">Ymyuuu 优选 (bestcf)</option>
-                            <option value="https://raw.githubusercontent.com/addresses1/ifconfig/main/addressesapi.txt">Addresses1 综合接口</option>
+                        <optgroup label="天诚（早中晚更新）">
+                            <option value="https://bestcf.pages.dev/tiancheng/all.txt">天诚 - 多地区全量版（推荐）</option>
+                            <option value="https://bestcf.pages.dev/tiancheng/mini.txt">天诚 - 多地区迷你版</option>
+                            <option value="https://bestcf.pages.dev/tiancheng/hk.txt">天诚 - 中国香港 HK</option>
+                            <option value="https://bestcf.pages.dev/tiancheng/sg.txt">天诚 - 新加坡 SG</option>
+                            <option value="https://bestcf.pages.dev/tiancheng/jp.txt">天诚 - 日本 JP</option>
+                            <option value="https://bestcf.pages.dev/tiancheng/tw.txt">天诚 - 中国台湾 TW</option>
+                            <option value="https://bestcf.pages.dev/tiancheng/kr.txt">天诚 - 韩国 KR</option>
+                            <option value="https://bestcf.pages.dev/tiancheng/us.txt">天诚 - 美国 US</option>
                         </optgroup>
-                        <optgroup label="社区聚合库">
-                            <option value="https://raw.githubusercontent.com/AlectoQAQ/cloudflare-ips/main/ips_v4.txt">AlectoQAQ IPv4</option>
-                            <option value="https://raw.githubusercontent.com/AlectoQAQ/cloudflare-ips/main/ips_v6.txt">AlectoQAQ IPv6</option>
-                            <option value="https://raw.githubusercontent.com/yaozxc/CloudflareSpeedTest-api/master/ip.txt">yaozxc 优选库</option>
+                        <optgroup label="vvHan（每小时更新）">
+                            <option value="https://bestcf.pages.dev/vvhan/ipv4.txt">vvHan - IPv4</option>
+                            <option value="https://bestcf.pages.dev/vvhan/ipv6.txt">vvHan - IPv6</option>
                         </optgroup>
-                        <optgroup label="CF 官方全量库">
-                            <option value="https://www.cloudflare.com/ips-v4">Cloudflare 官方 IPv4 段</option>
-                            <option value="https://www.cloudflare.com/ips-v6">Cloudflare 官方 IPv6 段</option>
-                            <option value="https://raw.githubusercontent.com/XIU2/CloudflareSpeedTest/master/ip.txt">XIU2 官方库 IPv4</option>
-                            <option value="https://raw.githubusercontent.com/XIU2/CloudflareSpeedTest/master/ipv6.txt">XIU2 官方库 IPv6</option>
+                        <optgroup label="Xinyitang3（每半小时更新）">
+                            <option value="https://bestcf.pages.dev/xinyitang3/ipv4.txt">Xinyitang3 - IPv4</option>
+                        </optgroup>
+                        <optgroup label="Gslege（每小时更新）">
+                            <option value="https://bestcf.pages.dev/gslege/Cfxyz.txt">Gslege - 测速</option>
+                            <option value="https://bestcf.pages.dev/gslege/SG.txt">Gslege - 新加坡 SG</option>
+                            <option value="https://bestcf.pages.dev/gslege/JP.txt">Gslege - 日本 JP</option>
+                            <option value="https://bestcf.pages.dev/gslege/DE.txt">Gslege - 德国 DE</option>
+                            <option value="https://bestcf.pages.dev/gslege/NL.txt">Gslege - 荷兰 NL</option>
+                            <option value="https://bestcf.pages.dev/gslege/US.txt">Gslege - 美国 US</option>
+                        </optgroup>
+                        <optgroup label="NiREvil（每天下午更新）">
+                            <option value="https://bestcf.pages.dev/nirevil/ipv4.txt">NiREvil - IPv4</option>
+                            <option value="https://bestcf.pages.dev/nirevil/ipv6.txt">NiREvil - IPv6</option>
+                        </optgroup>
+                        <optgroup label="MingYu（每半小时更新）">
+                            <option value="https://bestcf.pages.dev/mingyu/ipv4.txt">MingYu - IPv4</option>
+                            <option value="https://bestcf.pages.dev/mingyu/ipv6.txt">MingYu - IPv6</option>
+                            <option value="https://bestcf.pages.dev/mingyu/ipv4-onlyip.txt">MingYu - IPv4（单 IP 列表）</option>
+                        </optgroup>
+                        <optgroup label="ZhiXuan（每半小时更新）">
+                            <option value="https://bestcf.pages.dev/zhixuanwang/ipv4-onlyip.txt">ZhiXuan - IPv4（单 IP 列表）</option>
+                        </optgroup>
+                        <optgroup label="Anycast Entry IP">
+                            <option value="https://bestcf.pages.dev/entryip/50.txt">Anycast Entry IP - 50.txt</option>
                         </optgroup>
                     </select>
                     <input id="source-url-input" type="text" placeholder="预设拉取源 URL">
+                    <label class="input-toggle" style="margin-left: 0.25rem;"><input id="fetch-append" type="checkbox" checked> 累加</label>
                     <button id="fetch-source-btn" class="tool-btn">🌐 拉取源</button>
                 </div>
             </div>
@@ -421,6 +446,6 @@
         </div>
     </div>
     <div id="toast">✅ 操作成功</div>
-    <script src="/min.js"></script>
+    <script src="/app.js"></script>
 </body>
 </html>
