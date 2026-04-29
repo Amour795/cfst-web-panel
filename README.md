@@ -1,96 +1,88 @@
 # cfst-web-panel
 
-一个面向本地场景的 Cloudflare 节点测速与 DNS 同步面板。\
-后端基于 `Node.js + Express` 调用 `cfst` 引擎测速，前端为单页静态页面，提供测速、收藏、DNS 管理与参数设置。
+一个面向本地与云端场景的极简、高颜值宽带优选与测速面板。\
+后端基于 `Node.js + Express` 驱动 `cfst` 测速引擎，前端采用极致轻量的原生 JS + 毛玻璃（Glassmorphism）响应式 UI 设计，提供极致流畅的测速、节点管理及腾讯 DNSPod 优选 IP 同步体验。
 
 项目地址：<https://github.com/Amour795/cfst-web-panel>
 
 ## 界面预览
 
-![CFST Web Panel 界面预览](./docs/ui-preview.png)
+![CFST Web Panel 界面预览](./docs/ui-preview.png "CFST Web Panel 界面预览")
 
-## 上游项目
+## 上游项目与致谢
 
 - `cfst`（CloudflareSpeedTest）原项目地址：<https://github.com/XIU2/CloudflareSpeedTest>
-- 本项目不是测速引擎本体，而是基于 `cfst` 的本地 Web 管理面板；`延迟/下载测速`、`结果 CSV 输出` 等核心能力均来自上游 `cfst`
-- 本项目主要提供上层能力：可视化配置、任务进度展示（SSE/轮询）、收藏与历史管理、Cloudflare DNS 同步、主题切换等
-- 运行时会直接调用项目根目录中的 `cfst` 可执行文件（Windows 为 `cfst.exe`，Linux/macOS 为 `cfst`），因此功能边界和参数语义与上游版本保持强关联
-- 若上游 `cfst` 发布新参数或行为变更，本项目通常无需改动核心测速逻辑，但可能需要在前端设置项与参数映射上做同步适配
-- 感谢上游作者与社区维护，本项目定位为“本地运维场景的增强面板”，不替代上游命令行工具
+- 本项目**不是**测速引擎本体，而是基于 `cfst` 打造的“现代化 Web 管理控制台”。核心的`延迟/下载测速`、`结果 CSV 生成` 等底层能力均源自上游 `cfst`。
+- 本项目主要提供上层能力的跨越式提升：**可视化参数配置**、**高性能节点清洗提取**、**实时任务进度（SSE 双通道）**、**本地化收藏库**、**腾讯 DNSPod 批量同步**及**全端响应式 UI**。
+- 感谢上游作者与开源社区的持续维护。本项目定位为“本地/私有云运维场景的增强控制台”，是对上游命令行工具的生态补充。
 
-## 项目背景
+## 项目背景与重构亮点
 
-这个项目用于解决以下常见痛点：
+原始命令行工具虽然强大，但在日常调参、批量测试和跨设备管理时门槛较高。为了解决这些痛点，本项目进行了深度的重构与打磨：
 
-- `cfst` 命令行参数多，日常调参和批量测速门槛较高
-- 需要把“测速结果”快速转化为“可用 DNS 解析记录”
-- 需要在本地环境持续使用、保留历史结果和收藏节点
-- 希望对测速任务有可视化进度、超时控制和中途停止能力
-
-因此本项目采用“本地单体服务 + 浏览器面板”的方式，强调易用性、稳定性与可维护性。
+- ✨ **极简唯美 UI**：引入 macOS 级别的高斯模糊（毛玻璃）卡片设计，配合小清新渐变色板与平滑微交互，告别枯燥的纯文本控制台。
+- 📱 **H5 移动端原生级适配**：完美解决移动端与 PC 端的选择器样式冲突，支持视口边缘动态计算（防越界），无论大屏还是手机，操作都如丝般顺滑。
+- 🚀 **十万级高性能清洗引擎**：重构了底层的目标提取系统，采用极严苛的脏数据清洗策略（完美过滤带端口的乱码域名），支持 10 万级目标节点的秒级无卡顿处理与流式累加。
+- 🌐 **腾讯 DNSPod 无缝对接**：针对国内使用场景，将测速结果快速一键同步为腾讯 DNSPod 的 A/AAAA 解析记录。
 
 ## 核心功能
 
-- `测速大厅`：支持粘贴、CSV 导入、远程拉取源并提取目标 IP/域名
-- `输入模式`：支持 `IP` 模式与 `CNAME` 模式（域名自动解析 A/AAAA）
-- `实时进度`：SSE + 轮询双通道显示任务阶段、比例和消息
-- `引擎控制`：支持启动、超时终止、手动停止测速任务
-- `收藏管理`：收藏、删除、批量测速、标签管理、复制导出
-- `DNS 管理`：读取 Cloudflare 记录、单条删除、清空并批量同步优选 IP
-- `地区识别`：优先使用 `result.csv` 的 `colo`，不足时自动探测补齐
-- `设置持久化`：`cfst` 参数保存到 `database.json`，刷新后自动回显
-- `暗色模式`：支持系统跟随 / 浅色 / 深色手动切换
-- `系统维护`：可在面板触发测速引擎和官方 IP 段更新
+- `智能测速大厅`：支持直接粘贴、CSV 导入、远程多源拉取（支持累加防覆盖）。内置极速正则引擎，秒级提取 IPv4/IPv6。
+- `全景输入模式`：支持纯 `IP` 模式与 `CNAME` 智能解析模式（自动拦截并清洗脏域名）。
+- `实时进度展示`：采用 SSE + 轮询双通道架构，精确展示“解析 -> Ping -> 下载测试 -> 数据组装”全流程细节。
+- `精准引擎控制`：可视化配置测速线程、丢包容忍度、上下限等进阶参数，支持一键强制终止测速任务。
+- `持久化收藏夹`：支持对优质节点进行收藏、打标签、批量复测、一键复制及多维度数据对比。
+- `腾讯 DNS 同步`：在线读取 DNSPod 记录，支持新增、修改 TTL/线路，以及一键全量覆盖同步优选 IP。
+- `本地数据持久化`：所有设置项与收藏节点均保存在本地 `database.json` 中，断电重启不丢失配置。
+- `全自动化维护`：支持在 Web 面板中一键触发 `cfst` 二进制引擎更新与官方 IP 段（IPv4/IPv6）下载同步。
 
 ## 技术架构
 
-- 后端：`Express 4`、`multer`、原生 `fetch`、`child_process.spawn`
-- 前端：`public/index.html + public/app.js`（无框架）
-- 存储：`database.json`（收藏、设置、历史、最近目标）
-- 测速引擎：项目根目录 `./cfst` 可执行文件
-- 输出文件：`result.csv`（由 `cfst` 生成，后端解析后回传前端）
+- **后端**：`Express 4`、`multer`、`child_process.spawn`、原生 `fetch`
+- **前端**：`public/index.html + public/app.js`（零前端框架依赖，极致轻量加载）
+- **存储**：基于本地 `database.json` 的轻量级数据隔离
+- **引擎**：挂载项目根目录中的 `cfst` 核心二进制文件
+- **UI 规范**：Apple SF Pro / PingFang 字体栈，CSS Variables 主题引擎
 
 ## 环境要求
 
 - Node.js `>= 18`
 - 操作系统：`Linux / macOS / Windows / Termux(Android)`
-- 必备文件权限：项目目录可写（`database.json`、`result.csv`）
-- 可执行文件：
-- 非 Windows：`./cfst` 存在且具有执行权限
-- Windows：`.\cfst.exe` 存在
+- 目录权限：确保项目根目录具备写权限（需要读写 `database.json` 及 `result.csv`）
+- 测速组件：
+  - 非 Windows 环境：确保 `./cfst` 文件存在并具有可执行权限 (`chmod +x cfst`)
+  - Windows 环境：确保 `.\cfst.exe` 文件存在
 
 ## 安装与部署
 
 ### 推荐安装方式
 
-#### Linux / macOS / Termux
+#### Linux / macOS / Termux (一键部署)
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/Amour795/cfst-web-panel/main/install.sh)"
+bash -c "$(curl -fsSL [https://raw.githubusercontent.com/Amour795/cfst-web-panel/main/install.sh](https://raw.githubusercontent.com/Amour795/cfst-web-panel/main/install.sh))"
 ```
 
-Linux/macOS/Termux 推荐使用一键脚本。
-
-### Windows 手动安装（推荐）
+#### Windows 手动安装
 
 ```powershell
-git clone https://github.com/Amour795/cfst-web-panel.git
+git clone [https://github.com/Amour795/cfst-web-panel.git](https://github.com/Amour795/cfst-web-panel.git)
 cd cfst-web-panel
 npm install
 npm run build:min
-# 下载并解压 cfst_windows_amd64.zip，放置 cfst.exe 到项目根目录
+# 下载并解压上游提供的 cfst_windows_amd64.zip，将 cfst.exe 放置到本项目根目录
 node .\server.js
 ```
 
 ### 启动访问
 
-- 默认端口：`3088`
-- 若 `3088` 被占用，服务会自动尝试 `3089`
-- 访问地址以终端打印为准（通常 `http://localhost:3088`）
+- 默认监听端口：`3088`
+- 若该端口被占用，服务会自动探测并尝试 `3089` 及顺延端口。
+- 请在浏览器中访问终端输出的实际地址（如 `http://localhost:3088`）。
 
-### 进程托管（可选）
+### 进程守护 (进阶)
 
-建议长期运行时使用 `pm2`：
+推荐使用 `pm2` 让服务在后台长期静默运行：
 
 ```bash
 npm install -g pm2
@@ -100,109 +92,55 @@ pm2 save
 
 ## 使用说明
 
-### 1. 准备目标
-
-- 在测速页粘贴 IP/域名，或导入 CSV
-- 可通过“拉取源 URL”获取外部文本并自动提取目标
-- `IP` 模式下会校验纯 IP，`CNAME` 模式允许域名参与解析
-
-### 2. 执行测速
-
-- 点击“开始测速”创建任务
-- 进度面板显示“解析目标 -> Ping 测试 -> 下载测速 -> 结果解析”
-- 任务结束后按策略排序并返回 TopN
-
-### 3. 收藏与复测
-
-- 勾选结果后可批量收藏
-- 收藏页支持批量复测、打标签、删除、复制导出
-
-### 4. DNS 同步
-
-- 先在设置页填写 `Zone ID / 子域名 / Token`
-- 在 DNS 页刷新记录，或将选中优选 IP 覆盖同步到 Cloudflare
-
-### 5. 主题切换
-
-- 设置页 `外观` 可选：`跟随系统`、`浅色模式`、`黑夜模式`
-
-## 设置项与生效规则
-
-- `GET /api/settings/cfst` 读取当前配置，`POST /api/settings/cfst` 保存配置
-- 配置持久化到 `database.json -> settings.cfst_config`
-- 刷新页面后会重新请求后端并回显当前有效值
-- `disableDownload(-dd)`、`dnSingle`、`tl/tll/tlr/sl`、`allip`、`debug` 全部可保存
-- `解析超时(秒)`、`任务总超时(秒)`支持自由设置
-- 超时只受 Node 定时器技术上限影响（约 24.8 天）
-
-## 主要 API
-
-- `POST /api/start-test` 启动测速任务
-- `POST /api/stop-test` 手动停止任务
-- `GET /api/progress/:taskId` SSE 实时进度
-- `GET /api/progress-state/:taskId` 进度轮询兜底
-- `POST /api/fetch-source` 拉取远程目标源
-- `GET /api/saved-ips` 获取收藏
-- `POST /api/save-ips` 保存收藏
-- `POST /api/delete-ips` 删除收藏
-- `GET /api/settings/cf` 获取 CF 配置
-- `POST /api/settings/cf` 保存 CF 配置
-- `GET /api/cf/dns` 获取 DNS 记录
-- `POST /api/cf/dns/sync` 批量同步 DNS
-- `POST /api/system/update-engine` 更新 `cfst` 引擎
-- `POST /api/system/update-ips` 更新 Cloudflare 官方 IP 段
+1. **准备测速目标**：
+   在【测速】页的输入框粘贴 IP/域名，或使用面板底部的“拉取源预设”获取外部的高质量 IP 节点（勾选“累加”可合并多个源）。
+2. **执行测速任务**：
+   点击底部的“开始测速”。进度面板会实时滚动当前所处阶段及并发进度。结束后，列表将按最优策略返回 TopN 节点。
+3. **节点筛选与收藏**：
+   测速完成后，勾选速度达标的节点，点击“收藏”。在【收藏】页面可对这些长期节点打标签、做归类、或定期发起“批量复测”。
+4. **同步至腾讯 DNSPod**：
+   在【设置】中配置你的 `腾讯 DNSPod 域名` 及 `Token`。前往【DNS】页面，即可直观管理现有解析，或将优选出的 IP 一键发布到线上。
+5. **主题与参数偏好**：
+   在【设置】页中，你可以自由切换“浅色/深色/跟随系统”模式，并修改所有的测速核心参数（如下载测速大小、线程数、丢包限制等）。
 
 ## 目录结构
 
 ```text
 .
 ├── public/
-│   ├── index.html
-│   ├── app.js
-│   └── min.js
-├── server.js
-├── install.sh
+│   ├── index.html         # 前端核心页面 (响应式 UI)
+│   ├── app.js             # 前端交互与通信逻辑
+│   └── min.js             # 压缩后的生产级前端代码
+├── server.js              # Node.js 核心后端服务
+├── install.sh             # 快捷部署脚本
 ├── package.json
-├── database.json      # 运行时持久化数据
-├── result.csv         # cfst 输出结果
-├── cfst               # 非 Windows 引擎可执行文件
-└── cfst.exe           # Windows 引擎可执行文件
+├── database.json          # 面板运行时的持久化数据库
+├── result.csv             # 引擎测速完成后生成的原始结果表
+├── cfst                   # Linux / macOS 核心测速组件
+└── cfst.exe               # Windows 核心测速组件
 ```
 
-## 运维与排障
+## 运维与排障指南
 
-### 服务启动失败
-
-- 检查 Node 版本是否 `>=18`
-- 检查 `cfst` 是否存在且可执行：`chmod +x cfst`
-- 检查目录写权限（`database.json`/`result.csv`）
-
-### 设置保存后刷新不一致
-
-- 确认保存按钮提示成功
-- 升级后端后请重启 `node server.js`
-- 刷新页面后以接口回显值为准
-
-### 任务过慢或易超时
-
-- 增大 `任务总超时(秒)` 与 `解析超时(秒)`
-- 减小并发参数（如 `n`、`dn`、`dt`）以换稳定
-- 目标数很大时建议分批测速
+- **服务启动失败 / 报错**：请检查 Node.js 版本是否达标（`>= 18`），并确认 `cfst` 文件是否存在且有运行权限。
+- **测速过慢或频繁超时**：
+  在设置中调大 `任务总超时(秒)` 与 `解析超时(秒)`。若路由器性能瓶颈导致断流，请适当降低 `延迟测速线程(-n)`。
+- **拉取源提取出乱码 / 误判**：
+  本项目已采用严格清洗模式。如果遇到无法提取的特定格式文本，请确认未误勾选 `CNAME 解析`（勾选后将放宽正则以匹配域名）。
 
 ## 开发与构建
 
-- 开发启动：`node server.js`
-- 前端压缩：`npm run build:min`
-- 当前页面默认加载 `public/app.js`
-- `public/min.js` 作为压缩产物保留，便于发布与分发
+- 开发环境启动：`node server.js`
+- 生产环境构建：`npm run build:min`
+- 开发模式下页面默认加载 `public/app.js`，便于断点调试。`public/min.js` 为构建压缩产物。
 
 ## 免责声明
 
-- 本项目仅用于网络质量测试、学习研究和运维自用，请遵守当地法律法规与服务条款
-- 用户应自行保管 Cloudflare API Token 等敏感信息，因泄露导致的风险由使用者承担
-- 任何基于本项目的测速、解析变更、流量调度行为，后果由操作人自行负责
-- 项目按“现状”提供，不对特定环境下的可用性、稳定性或适配性作担保
+- 本项目仅用于个人网络环境的质量测试、学习研究及本地运维自用，请严格遵守当地相关法律法规及服务条款。
+- 用户应自行妥善保管 DNS API Token 等敏感凭证，因信息泄露导致的任何风险由使用者自行承担。
+- 任何基于本工具发起的测速、解析变更、流量调度等行为，造成的网络波动或后果由操作人自行负责。
+- 项目按“现状”开源提供，不对特定软硬件环境下的可用性、稳定性作任何形式的担保。
 
 ## 许可协议
 
-默认遵循仓库中的许可证文件（如后续补充 `LICENSE`，以该文件为准）。
+默认遵循仓库中的许可证文件（如有补充 `LICENSE`，以该文件为准）。
