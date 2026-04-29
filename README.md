@@ -109,8 +109,7 @@ pm2 save
 .
 ├── public/
 │   ├── index.html         # 前端核心页面 (响应式 UI)
-│   ├── app.js             # 前端交互与通信逻辑
-│   └── min.js             # 压缩后的生产级前端代码
+│   └── app.js             # 前端交互与通信逻辑
 ├── server.js              # Node.js 核心后端服务
 ├── install.sh             # 快捷部署脚本
 ├── package.json
