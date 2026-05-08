@@ -230,8 +230,17 @@
                 <div class="source-fetch">
                     <select id="source-url-preset">
                         <option value="custom">拉取源预设（自定义）</option>
-                        <optgroup label="天诚（早中晚更新）">
-                            <option value="https://bestcf.pages.dev/tiancheng/all.txt">天诚 - 多地区全量版（推荐）</option>
+                        <optgroup label="Gslege（早中晚更新）">
+                            <option value="https://bestcf.pages.dev/gslege/Cfxyz.txt">Gslege - 带测速</option>
+                            <option value="https://bestcf.pages.dev/gslege/SG.txt">Gslege - 新加坡 SG</option>
+                            <option value="https://bestcf.pages.dev/gslege/DE.txt">Gslege - 德国 DE</option>
+                            <option value="https://bestcf.pages.dev/gslege/US.txt">Gslege - 美国 US</option>
+                            <option value="https://bestcf.pages.dev/gslege/NL.txt">Gslege - 荷兰 NL</option>
+                            <option value="https://bestcf.pages.dev/gslege/JP.txt">Gslege - 日本 JP</option>
+                        </optgroup>
+                        <optgroup label="天诚（暂时断更）">
+                            <option value="https://raw.githubusercontent.com/gshtwy/CF-DNS-Clone/refs/heads/main/wetest-cloudflare-v4.txt">天诚 - 临时过渡</option>
+                            <option value="https://bestcf.pages.dev/tiancheng/all.txt">天诚 - 多地区全量版</option>
                             <option value="https://bestcf.pages.dev/tiancheng/mini.txt">天诚 - 多地区迷你版</option>
                             <option value="https://bestcf.pages.dev/tiancheng/hk.txt">天诚 - 中国香港 HK</option>
                             <option value="https://bestcf.pages.dev/tiancheng/sg.txt">天诚 - 新加坡 SG</option>
@@ -240,34 +249,44 @@
                             <option value="https://bestcf.pages.dev/tiancheng/kr.txt">天诚 - 韩国 KR</option>
                             <option value="https://bestcf.pages.dev/tiancheng/us.txt">天诚 - 美国 US</option>
                         </optgroup>
-                        <optgroup label="vvHan（每小时更新）">
+                        <optgroup label="Xinyitang（每半小时更新）">
+                            <option value="https://bestcf.pages.dev/xinyitang3/ipv4.txt">Xinyitang - IPv4</option>
+                        </optgroup>
+                        <optgroup label="WeTest（每半小时更新 / 分三网）">
+                            <option value="https://bestcf.pages.dev/wetest/ipv4.txt">WeTest - IPv4</option>
+                        </optgroup>
+                        <optgroup label="vvHan（每小时更新 / 分三网）">
                             <option value="https://bestcf.pages.dev/vvhan/ipv4.txt">vvHan - IPv4</option>
                             <option value="https://bestcf.pages.dev/vvhan/ipv6.txt">vvHan - IPv6</option>
                         </optgroup>
-                        <optgroup label="Xinyitang3（每半小时更新）">
-                            <option value="https://bestcf.pages.dev/xinyitang3/ipv4.txt">Xinyitang3 - IPv4</option>
+                        <optgroup label="JZ（每半小时更新 / 联通）">
+                            <option value="https://raw.githubusercontent.com/HandsomeMJZ/cfip/refs/heads/main/best_ips.txt">JZ - TOP</option>
+                            <option value="https://raw.githubusercontent.com/HandsomeMJZ/cfip/refs/heads/main/full_ips.txt">JZ - All</option>
                         </optgroup>
-                        <optgroup label="Gslege（每小时更新）">
-                            <option value="https://bestcf.pages.dev/gslege/Cfxyz.txt">Gslege - 测速</option>
-                            <option value="https://bestcf.pages.dev/gslege/SG.txt">Gslege - 新加坡 SG</option>
-                            <option value="https://bestcf.pages.dev/gslege/JP.txt">Gslege - 日本 JP</option>
-                            <option value="https://bestcf.pages.dev/gslege/DE.txt">Gslege - 德国 DE</option>
-                            <option value="https://bestcf.pages.dev/gslege/NL.txt">Gslege - 荷兰 NL</option>
-                            <option value="https://bestcf.pages.dev/gslege/US.txt">Gslege - 美国 US</option>
+                        <optgroup label="CM（每秒更新 / 随机优选）">
+                            <option value="https://090227.pages.dev/bestcf?isp=all&amp;ips=20">CM - 三网</option>
+                            <option value="https://090227.pages.dev/bestcf?isp=ct&amp;ips=50">CM - 电信</option>
+                            <option value="https://090227.pages.dev/bestcf?isp=cu&amp;ips=50">CM - 联通</option>
+                            <option value="https://090227.pages.dev/bestcf?isp=cmcc&amp;ips=50">CM - 移动</option>
                         </optgroup>
-                        <optgroup label="NiREvil（每天下午更新）">
+                        <optgroup label="NiREvil（每天下午更新 / 分三网）">
                             <option value="https://bestcf.pages.dev/nirevil/ipv4.txt">NiREvil - IPv4</option>
                             <option value="https://bestcf.pages.dev/nirevil/ipv6.txt">NiREvil - IPv6</option>
                         </optgroup>
                         <optgroup label="MingYu（每半小时更新）">
                             <option value="https://bestcf.pages.dev/mingyu/ipv4.txt">MingYu - IPv4</option>
                             <option value="https://bestcf.pages.dev/mingyu/ipv6.txt">MingYu - IPv6</option>
-                            <option value="https://bestcf.pages.dev/mingyu/ipv4-onlyip.txt">MingYu - IPv4（单 IP 列表）</option>
+                            <option value="https://bestcf.pages.dev/mingyu/ipv4-onlyip.txt">MingYu - IPv4 单IP列表</option>
                         </optgroup>
-                        <optgroup label="ZhiXuan（每半小时更新）">
-                            <option value="https://bestcf.pages.dev/zhixuanwang/ipv4-onlyip.txt">ZhiXuan - IPv4（单 IP 列表）</option>
+                        <optgroup label="ZhiXuan（每半小时更新 / 单IP列表）">
+                            <option value="https://bestcf.pages.dev/zhixuanwang/ipv4-onlyip.txt">ZhiXuan - IPv4 单IP列表</option>
                         </optgroup>
-                        <optgroup label="Anycast Entry IP">
+                        <optgroup label="SUB订阅（仅用于CM脚本）">
+                            <option value="sub://sub.cmliussss.net#CM">SUB - CMLiu</option>
+                            <option value="sub://owo.o00o.ooo#MR">SUB - Moist_R</option>
+                            <option value="sub://sub.xinyitang.dpdns.org#XYT">SUB - Xinyitang</option>
+                        </optgroup>
+                        <optgroup label="Anycast Entry IP（新手勿用）">
                             <option value="https://bestcf.pages.dev/entryip/50.txt">Anycast Entry IP - 50.txt</option>
                         </optgroup>
                     </select>
