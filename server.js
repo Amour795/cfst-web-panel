@@ -303,23 +303,24 @@ app.post('/api/system/fetch-bestcf', async (req, res) => {
             signal: AbortSignal.timeout(15000)
         });
         if (!response.ok) return res.json({ success: false, msg: `上游响应异常: ${response.status}` });
-        const html = await response.text();
+        const markdown = await response.text();
         
         const extracted = [];
         
         // 提取 "## 优选IP" 到 "## 优选工具" 之间的内容
-        const sectionMatch = html.match(/##\s*优选IP([\s\S]*?)(?=##\s*优选工具)/i);
-        const sectionHtml = sectionMatch ? sectionMatch[1] : '';
+        const sectionMatch = markdown.match(/##\s*优选IP([\s\S]*?)(?=##\s*优选工具)/i);
+        const sectionMd = sectionMatch ? sectionMatch[1] : '';
         
-        if (!sectionHtml) {
+        if (!sectionMd) {
             return res.json({ success: false, msg: '未能在页面中找到优选IP区域' });
         }
         
-        // 从该区域中提取所有 txt 链接
-        const hrefRegex = /href=["']([^"'\s]+\.txt[^"'\s]*)["']/g;
+        // Markdown 链接格式：[标题](链接)
+        const linkRegex = /\[([^\]]*)\]\(([^)]+\.txt[^)]*)\)/g;
         let match;
-        while ((match = hrefRegex.exec(sectionHtml)) !== null) {
-            let url = match[1];
+        while ((match = linkRegex.exec(sectionMd)) !== null) {
+            let title = match[1].trim();
+            let url = match[2].trim();
             if (url.startsWith('/')) url = 'https://bestcf.pages.dev' + url;
             if (!url.startsWith('http')) continue;
             
@@ -332,15 +333,16 @@ app.post('/api/system/fetch-bestcf', async (req, res) => {
                 }
             }
             
-            // 提取文件名作为标题
-            let title = '未知';
-            try {
-                const urlObj = new URL(url);
-                const pathParts = urlObj.pathname.split('/');
-                if (pathParts.length > 0) {
-                    title = pathParts[pathParts.length - 1].replace('.txt', '');
-                }
-            } catch {}
+            // 如果标题为空，从文件名提取
+            if (!title) {
+                try {
+                    const urlObj = new URL(url);
+                    const pathParts = urlObj.pathname.split('/');
+                    if (pathParts.length > 0) {
+                        title = pathParts[pathParts.length - 1].replace('.txt', '');
+                    }
+                } catch {}
+            }
             
             extracted.push({ group: groupName, title, url });
         }
