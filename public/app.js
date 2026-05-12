@@ -15,10 +15,6 @@ const allowCnameInput = document.getElementById('allow-cname-input');
 const fileInput = document.getElementById('file-input');
 const importCsvBtn = document.getElementById('import-csv-btn');
 const clearInputBtn = document.getElementById('clear-input-btn');
-const sourceUrlPreset = document.getElementById('source-url-preset');
-const sourceUrlInput = document.getElementById('source-url-input');
-const fetchSourceBtn = document.getElementById('fetch-source-btn');
-const fetchAppend = document.getElementById('fetch-append');
 
 const startBtn = document.getElementById('start-btn');
 const statusPanel = document.getElementById('status-panel');
@@ -465,6 +461,22 @@ function updateProgressUI(payload) {
         if (payload.current && payload.total) statusSub.innerText = `${payload.current}/${payload.total}`;
         else if (payload.message) statusSub.innerText = payload.message.slice(0, 70);
     }
+    
+    // 更新详情区域
+    const statusDetails = document.getElementById('status-details');
+    const currentIpEl = document.getElementById('current-ip');
+    const currentSpeedEl = document.getElementById('current-speed');
+    const avgSpeedEl = document.getElementById('avg-speed');
+    
+    if (payload.currentIp || payload.currentSpeed || payload.avgSpeed) {
+        statusDetails?.classList.remove('hidden');
+        if (currentIpEl) currentIpEl.innerText = payload.currentIp || '-';
+        if (currentSpeedEl) currentSpeedEl.innerText = payload.currentSpeed ? `${payload.currentSpeed} MB/s` : '-';
+        if (avgSpeedEl) avgSpeedEl.innerText = payload.avgSpeed ? `${payload.avgSpeed} MB/s` : '-';
+    } else {
+        statusDetails?.classList.add('hidden');
+    }
+    
     if (typeof payload.percent === 'number' && progressFill && progressLabel) {
         let pct = Math.max(0, Math.min(100, payload.percent));
         if (payload.state !== 'done' && payload.state !== 'error' && pct >= 100) pct = 99;
@@ -523,31 +535,6 @@ ipInput?.addEventListener('blur', () => extractAndUpdateInput(ipInput.value));
 clearInputBtn?.addEventListener('click', () => { if(ipInput) ipInput.value = ''; parsedTargets = []; if(ipCount) ipCount.innerText = '0'; });
 allowCnameInput?.addEventListener('change', () => extractAndUpdateInput(ipInput?.value));
 
-sourceUrlPreset?.addEventListener('change', () => {
-    const val = sourceUrlPreset.value;
-    if (val !== 'custom') {
-        if(sourceUrlInput) sourceUrlInput.value = val;
-        fetchSourceBtn?.click();
-    }
-});
-
-// 核心修复2：拉取源时数据完美累加
-fetchSourceBtn?.addEventListener('click', async () => {
-    const url = sourceUrlInput?.value.trim(); if (!url) return showToast('❌ 请输入 URL');
-    if(fetchSourceBtn) { fetchSourceBtn.disabled = true; fetchSourceBtn.innerText = '拉取中...'; }
-    try {
-        const res = await fetch('/api/fetch-source', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ url }) });
-        const json = await res.json();
-        if (json.success) {
-            const append = fetchAppend?.checked ?? true;
-            // 通过 \n 拼合新老数据，再交由 extractAndUpdateInput 清理，彻底解决丢数据问题
-            const nextText = append ? [ipInput?.value, json.data].filter(Boolean).join('\n') : json.data;
-            extractAndUpdateInput(nextText);
-            showToast(`✅ 成功拉取`);
-        }
-    } finally { if(fetchSourceBtn) { fetchSourceBtn.disabled = false; fetchSourceBtn.innerText = '🌐 拉取源'; } }
-});
-
 importCsvBtn?.addEventListener('click', () => fileInput?.click());
 fileInput?.addEventListener('change', (e) => {
     if (!e.target.files[0]) return;
@@ -556,30 +543,22 @@ fileInput?.addEventListener('change', (e) => {
     reader.readAsText(e.target.files[0]); if(fileInput) fileInput.value = '';
 });
 
-// 系统维护接口调用
-document.getElementById('update-engine-btn')?.addEventListener('click', async () => {
-    const btn = document.getElementById('update-engine-btn');
-    btn.disabled = true; btn.innerText = '⏳ 下载解压中...';
+document.getElementById('fetch-bestcf-all-btn')?.addEventListener('click', async () => {
+    const btn = document.getElementById('fetch-bestcf-all-btn');
+    btn.disabled = true; btn.innerText = '⏳ 正在汇总...';
     try {
-        const res = await fetch('/api/system/update-engine', { method: 'POST' });
+        const res = await fetch('/api/system/fetch-bestcf-all', { method: 'POST' });
         const json = await res.json();
-        if (json.success) showToast('✅ 引擎已成功更新到最新版');
-        else showToast('❌ ' + json.msg);
+        if (json.success) {
+            extractAndUpdateInput(json.data);
+            showToast(`✅ 已拉取云端全部（${json.ok}/${json.sources} 源，${json.lines} 行，仅 IPv4）`);
+        } else {
+            showToast('❌ ' + (json.msg || '拉取失败'));
+        }
     } catch (e) { showToast('❌ 网络错误'); }
-    finally { btn.disabled = false; btn.innerText = '🔄 升级 CFST 测速引擎'; }
+    finally { btn.disabled = false; btn.innerText = '⚡ 拉取云端全部'; }
 });
 
-document.getElementById('update-ips-btn')?.addEventListener('click', async () => {
-    const btn = document.getElementById('update-ips-btn');
-    btn.disabled = true; btn.innerText = '⏳ 获取中...';
-    try {
-        const res = await fetch('/api/system/update-ips', { method: 'POST' });
-        const json = await res.json();
-        if (json.success) showToast('✅ 官方 IPv4/v6 库已更新');
-        else showToast('❌ ' + json.msg);
-    } catch (e) { showToast('❌ 网络错误'); }
-    finally { btn.disabled = false; btn.innerText = '📥 更新官方 IP 库 (txt)'; }
-});
 
 function renderTable(dataArray, emptyMsg) {
     if (!resultBody) return;
@@ -813,27 +792,28 @@ async function loadCfstConfig() {
 }
 cfstMode?.addEventListener('change', updateCfstModeVisibility);
 saveSettingsBtn?.addEventListener('click', async () => {
+    const getNum = (el) => (el && el.value !== '') ? Number(el.value) : null;
     const payload = {
         mode: cfstMode?.value,
-        httpingCode: Number(cfstHttpingCodeInput?.value),
+        httpingCode: getNum(cfstHttpingCodeInput),
         cfcolo: (cfstCfcoloInput?.value || '').trim(),
         url: cfstUrlInput?.value,
-        dt: Number(cfstDtInput?.value),
-        dn: Number(cfstDnInput?.value),
-        dnSingle: Number(cfstDnSingleInput?.value),
-        n: Number(cfstNInput?.value),
-        t: Number(cfstTInput?.value),
-        tp: Number(cfstTpInput?.value),
-        tl: Number(cfstTlInput?.value),
-        tll: Number(cfstTllInput?.value),
-        tlr: Number(cfstTlrInput?.value),
-        sl: Number(cfstSlInput?.value),
+        dt: getNum(cfstDtInput),
+        dn: getNum(cfstDnInput),
+        dnSingle: getNum(cfstDnSingleInput),
+        n: getNum(cfstNInput),
+        t: getNum(cfstTInput),
+        tp: getNum(cfstTpInput),
+        tl: getNum(cfstTlInput),
+        tll: getNum(cfstTllInput),
+        tlr: getNum(cfstTlrInput),
+        sl: getNum(cfstSlInput),
         disableDownload: !!cfstDisableDownload?.checked,
         allip: !!cfstAllip?.checked,
         debug: !!cfstDebug?.checked,
-        topN: Number(cfstTopNInput?.value),
-        parseTimeoutSec: Number(parseTimeoutInput?.value),
-        totalTimeoutSec: Number(totalTimeoutInput?.value)
+        topN: getNum(cfstTopNInput),
+        parseTimeoutSec: getNum(parseTimeoutInput),
+        totalTimeoutSec: getNum(totalTimeoutInput)
     };
     try {
         const res = await fetch('/api/settings/cfst', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });

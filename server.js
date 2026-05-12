@@ -113,18 +113,52 @@ function parseProgressLine(line) {
     if (cleanLine === '[' || cleanLine === ']' || cleanLine === '[]') return null;
     if (/^[-=\s]{8,}\]?$/.test(cleanLine)) return null;
     if (/^\[[\s\-=]+\]$/.test(cleanLine)) return null;
-    cleanLine = cleanLine.replace(/\[[^\]]*\]/g, '').replace(/\s{2,}/g, ' ').trim();
-    if (!cleanLine) return null;
-    if (cleanLine.length > 160) cleanLine = cleanLine.slice(0, 160) + '...';
-
+    
+    const payload = { state: 'running', message: cleanLine.replace(/\[[^\]]*\]/g, '').replace(/\s{2,}/g, ' ').trim() };
+    
+    // 提取 IP 地址
+    const ipv4Regex = /(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)/;
+    const ipv6Regex = /(?:(?:[0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,7}:|(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}|(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}|(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}|(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:(?:(?::[0-9a-fA-F]{1,4}){1,6})|:(?:(?::[0-9a-fA-F]{1,4}){1,7}|:))/;
+    const ipMatch = cleanLine.match(ipv4Regex) || cleanLine.match(ipv6Regex);
+    if (ipMatch) {
+        payload.currentIp = ipMatch[0];
+    }
+    
+    // 提取速度信息（支持多种单位）
+    const speedRegex = /(\d+(?:\.\d+)?)\s*(MB\/s|MBps|MB\/s|kb\/s|KBps|KB\/s|mb\/s|Mbps)/i;
+    const speedMatch = cleanLine.match(speedRegex);
+    if (speedMatch) {
+        let speed = Number(speedMatch[1]);
+        const unit = speedMatch[2].toLowerCase();
+        // 统一转换为 MB/s
+        if (unit.includes('kb') || unit.includes('kbps')) {
+            speed = speed / 1024;
+        }
+        payload.currentSpeed = speed.toFixed(2);
+    }
+    
+    // 提取平均速度
+    const avgSpeedRegex = /平均.*?(\d+(?:\.\d+)?)\s*(MB\/s|MBps|MB\/s|kb\/s|KBps|KB\/s|mb\/s|Mbps)/i;
+    const avgSpeedMatch = cleanLine.match(avgSpeedRegex);
+    if (avgSpeedMatch) {
+        let avgSpeed = Number(avgSpeedMatch[1]);
+        const unit = avgSpeedMatch[2].toLowerCase();
+        if (unit.includes('kb') || unit.includes('kbps')) {
+            avgSpeed = avgSpeed / 1024;
+        }
+        payload.avgSpeed = avgSpeed.toFixed(2);
+    }
+    
+    // 提取进度比
     const ratioMatch = cleanLine.match(/(\d+)\s*\/\s*(\d+)/);
     const lower = cleanLine.toLowerCase();
     let phase = '测速中';
     if (lower.includes('ping')) phase = 'Ping 测试';
     else if (lower.includes('download') || cleanLine.includes('下载')) phase = '下载测速';
     else if (lower.includes('ip')) phase = '目标扫描';
-
-    const payload = { state: 'running', phase, message: cleanLine };
+    
+    payload.phase = phase;
+    
     if (ratioMatch) {
         const current = Number(ratioMatch[1]);
         const total = Number(ratioMatch[2]);
@@ -133,6 +167,7 @@ function parseProgressLine(line) {
             payload.total = total;
         }
     }
+    
     return payload;
 }
 
@@ -199,35 +234,6 @@ app.post('/api/stop-test', async (req, res) => {
     }
 });
 
-app.post('/api/fetch-source', async (req, res) => {
-    const rawUrl = String(req.body?.url || '').trim();
-    if (!rawUrl) return res.status(400).json({ success: false, msg: 'URL 不能为空' });
-    if (rawUrl.length > 500) return res.status(400).json({ success: false, msg: 'URL 过长' });
-
-    let parsed;
-    try { parsed = new URL(rawUrl); } catch { return res.status(400).json({ success: false, msg: 'URL 格式不合法' }); }
-    if (!['http:', 'https:'].includes(parsed.protocol)) return res.status(400).json({ success: false, msg: '仅支持 http/https 地址' });
-    
-    const host = String(parsed.hostname || '').toLowerCase();
-    if (!host || host === 'localhost' || host.endsWith('.local') || isPrivateIP(host)) {
-        return res.status(400).json({ success: false, msg: '不允许拉取本地/内网地址' });
-    }
-
-    try {
-        const response = await fetch(parsed.toString(), {
-            method: 'GET',
-            headers: { 'User-Agent': 'cfst-web-panel/1.0' },
-            signal: AbortSignal.timeout(15000)
-        });
-        if (!response.ok) return res.status(400).json({ success: false, msg: `上游响应异常: ${response.status}` });
-        const text = await response.text();
-        const capped = String(text || '').slice(0, 2 * 1024 * 1024);
-        return res.json({ success: true, data: capped });
-    } catch (e) {
-        return res.status(500).json({ success: false, msg: '拉取源地址失败，请稍后重试' });
-    }
-});
-
 // --- 系统维护接口 ---
 app.post('/api/system/update-engine', (req, res) => {
     const platform = os.platform();
@@ -290,6 +296,159 @@ app.post('/api/system/update-ips', async (req, res) => {
     }
 });
 
+app.post('/api/system/fetch-bestcf', async (req, res) => {
+    try {
+        const response = await fetch('https://bestcf.pages.dev/', {
+            headers: { 'User-Agent': 'cfst-web-panel/1.0' },
+            signal: AbortSignal.timeout(15000)
+        });
+        if (!response.ok) return res.json({ success: false, msg: `上游响应异常: ${response.status}` });
+        const html = await response.text();
+        
+        const extracted = [];
+        
+        // 提取 "## 优选IP" 到 "## 优选工具" 之间的内容
+        const sectionMatch = html.match(/##\s*优选IP([\s\S]*?)(?=##\s*优选工具)/i);
+        const sectionHtml = sectionMatch ? sectionMatch[1] : '';
+        
+        if (!sectionHtml) {
+            return res.json({ success: false, msg: '未能在页面中找到优选IP区域' });
+        }
+        
+        // 从该区域中提取所有 txt 链接
+        const hrefRegex = /href=["']([^"'\s]+\.txt[^"'\s]*)["']/g;
+        let match;
+        while ((match = hrefRegex.exec(sectionHtml)) !== null) {
+            let url = match[1];
+            if (url.startsWith('/')) url = 'https://bestcf.pages.dev' + url;
+            if (!url.startsWith('http')) continue;
+            
+            // 提取路径作为分组
+            let groupName = '未分组';
+            if (url.includes('bestcf.pages.dev')) {
+                const pathParts = url.replace('https://bestcf.pages.dev/', '').split('/');
+                if (pathParts.length > 1) {
+                    groupName = pathParts[0];
+                }
+            }
+            
+            // 提取文件名作为标题
+            let title = '未知';
+            try {
+                const urlObj = new URL(url);
+                const pathParts = urlObj.pathname.split('/');
+                if (pathParts.length > 0) {
+                    title = pathParts[pathParts.length - 1].replace('.txt', '');
+                }
+            } catch {}
+            
+            extracted.push({ group: groupName, title, url });
+        }
+        
+        // 同时也提取一些常用的优选 API
+        const additionalSources = [
+            { group: 'CM (实时更新)', title: '三网 200', url: 'https://090227.pages.dev/bestcf?isp=all&ips=200' },
+            { group: 'CM (实时更新)', title: '电信 200', url: 'https://090227.pages.dev/bestcf?isp=ct&ips=200' },
+            { group: 'CM (实时更新)', title: '联通 200', url: 'https://090227.pages.dev/bestcf?isp=cu&ips=200' },
+            { group: 'CM (实时更新)', title: '移动 200', url: 'https://090227.pages.dev/bestcf?isp=cmcc&ips=200' }
+        ];
+        
+        const allSources = [...extracted, ...additionalSources];
+        
+        if (allSources.length === 0) {
+            return res.json({ success: false, msg: '未能找到 txt 链接' });
+        }
+        
+        // 去重
+        const seen = new Set();
+        const groupsMap = new Map();
+        for (const item of allSources) {
+            const key = item.url.trim();
+            if (seen.has(key)) continue;
+            seen.add(key);
+            const g = item.group || '未分组';
+            if (!groupsMap.has(g)) groupsMap.set(g, []);
+            groupsMap.get(g).push({ title: item.title, url: item.url });
+        }
+        const grouped = Array.from(groupsMap.entries()).map(([group, items]) => ({ group, items }));
+
+        await setSetting('bestcf_sources', JSON.stringify(grouped));
+        res.json({ success: true, count: allSources.length, data: grouped });
+    } catch (e) {
+        res.json({ success: false, msg: '同步失败: ' + e.message });
+    }
+});
+
+app.get('/api/settings/bestcf-sources', async (req, res) => {
+    try {
+        const raw = await getSetting('bestcf_sources');
+        let data = raw ? JSON.parse(raw) : [];
+        res.json({ success: true, data: Array.isArray(data) ? data : [] });
+    } catch (e) {
+        res.json({ success: false, data: [] });
+    }
+});
+
+app.post('/api/system/fetch-bestcf-all', async (req, res) => {
+    try {
+        // 先同步最新的源列表
+        const syncUrl = `http://127.0.0.1:${process.env.PORT || DEFAULT_PORT}/api/system/fetch-bestcf`;
+        await fetch(syncUrl, { method: 'POST' }).then(r => r.json()).catch(() => null);
+        
+        // 从数据库获取最新源
+        const raw = await getSetting('bestcf_sources');
+        const groups = raw ? JSON.parse(raw) : [];
+        const urls = [];
+        groups.forEach(g => (g.items || []).forEach(it => { if (it?.url && it.url.startsWith('http')) urls.push(it.url); }));
+        const uniq = Array.from(new Set(urls));
+        if (!uniq.length) return res.json({ success: false, msg: '无可用源' });
+
+        // 默认只返回 IPv4，不需要 IPv6
+        const v4Only = true;
+
+        const results = [];
+        const errors = [];
+        const limit = 40; // 增加并发数以获取更多 IP
+        let idx = 0;
+        async function worker() {
+            while (idx < uniq.length) {
+                const current = uniq[idx++];
+                try {
+                    const r = await fetch(current, { headers: { 'User-Agent': 'cfst-web-panel/1.0' }, signal: AbortSignal.timeout(20000) });
+                    if (!r.ok) { errors.push(current); continue; }
+                    const text = (await r.text()).slice(0, 2 * 1024 * 1024);
+                    results.push(text);
+                } catch { errors.push(current); }
+            }
+        }
+        await Promise.all(Array.from({ length: Math.min(limit, uniq.length) }).map(worker));
+        
+        const lines = new Set();
+        const ipv4Exact = /^((25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(25[0-5]|2[0-4]\d|[01]?\d\d?)$/;
+        
+        // 更强大的 IP 提取逻辑
+        const ipRegex = /((?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)/g;
+        
+        results.join('\n').split(/\r?\n/).forEach(l => { 
+            let s = String(l || '').trim(); 
+            if (!s) return;
+            
+            // 从整行中提取所有可能的 IPv4 地址
+            const matches = s.match(ipRegex);
+            if (matches) {
+                matches.forEach(ip => {
+                    if (ipv4Exact.test(ip)) {
+                        lines.add(ip);
+                    }
+                });
+            }
+        });
+        const merged = Array.from(lines).join('\n');
+        res.json({ success: true, sources: uniq.length, ok: results.length, failed: errors.length, data: merged, lines: lines.size, v4Only });
+    } catch (e) {
+        res.json({ success: false, msg: '聚合失败: ' + e.message });
+    }
+});
 // --- 💾 数据库配置：JSON 持久化存储 ---
 const DB_FILE = path.join(__dirname, 'database.json');
 let dbData = { saved_ips: [], settings: {}, test_history: {}, last_targets: [] };
@@ -972,30 +1131,35 @@ async function getCfstConfig() {
         const parsed = JSON.parse(raw);
         const mode = parsed.mode === 'http' ? 'http' : 'tcp';
         const cfcoloNormalized = typeof parsed.cfcolo === 'string' ? parsed.cfcolo.trim() : '';
-        const tlr = Number(parsed.tlr);
-        const parseTimeoutSec = Number(parsed.parseTimeoutSec);
-        const totalTimeoutSec = Number(parsed.totalTimeoutSec);
+        
+        const getNum = (val, min, max, def) => {
+            if (val === null || val === undefined || val === '') return def;
+            const n = Number(val);
+            if (!Number.isFinite(n)) return def;
+            return Math.max(min, Math.min(max, n));
+        };
+
         return {
-            n: Number.isFinite(Number(parsed.n)) ? Math.max(1, Math.min(1000, Number(parsed.n))) : defaults.n,
-            t: Number.isFinite(Number(parsed.t)) ? Math.max(1, Math.min(20, Number(parsed.t))) : defaults.t,
-            tp: Number.isFinite(Number(parsed.tp)) ? Math.max(1, Math.min(65535, Number(parsed.tp))) : defaults.tp,
+            n: getNum(parsed.n, 1, 1000, defaults.n),
+            t: getNum(parsed.t, 1, 20, defaults.t),
+            tp: getNum(parsed.tp, 1, 65535, defaults.tp),
             url: typeof parsed.url === 'string' && parsed.url.trim() ? parsed.url.trim() : defaults.url,
             mode,
-            httpingCode: Number.isFinite(Number(parsed.httpingCode)) ? Math.max(100, Math.min(599, Number(parsed.httpingCode))) : defaults.httpingCode,
+            httpingCode: getNum(parsed.httpingCode, 100, 599, defaults.httpingCode),
             cfcolo: cfcoloNormalized,
-            dt: Number.isFinite(Number(parsed.dt)) ? Math.max(1, Math.min(30, Number(parsed.dt))) : defaults.dt,
-            dn: Number.isFinite(Number(parsed.dn)) ? Math.max(1, Math.min(50, Number(parsed.dn))) : defaults.dn,
-            dnSingle: Number.isFinite(Number(parsed.dnSingle)) ? Math.max(1, Math.min(10, Number(parsed.dnSingle))) : defaults.dnSingle,
-            tl: Number.isFinite(Number(parsed.tl)) ? Math.max(0, Math.min(9999, Number(parsed.tl))) : defaults.tl,
-            tll: Number.isFinite(Number(parsed.tll)) ? Math.max(0, Math.min(9999, Number(parsed.tll))) : defaults.tll,
-            tlr: Number.isFinite(tlr) ? Math.max(0, Math.min(1, tlr)) : defaults.tlr,
-            sl: Number.isFinite(Number(parsed.sl)) ? Math.max(0, Math.min(9999, Number(parsed.sl))) : defaults.sl,
+            dt: getNum(parsed.dt, 1, 30, defaults.dt),
+            dn: getNum(parsed.dn, 1, 50, defaults.dn),
+            dnSingle: getNum(parsed.dnSingle, 1, 10, defaults.dnSingle),
+            tl: getNum(parsed.tl, 0, 9999, defaults.tl),
+            tll: getNum(parsed.tll, 0, 9999, defaults.tll),
+            tlr: getNum(parsed.tlr, 0, 1, defaults.tlr),
+            sl: getNum(parsed.sl, 0, 9999, defaults.sl),
             disableDownload: Boolean(parsed.disableDownload),
             allip: Boolean(parsed.allip),
             debug: Boolean(parsed.debug),
-            topN: Number.isFinite(Number(parsed.topN)) ? Math.max(1, Math.min(200, Number(parsed.topN))) : defaults.topN,
-            parseTimeoutSec: Number.isFinite(parseTimeoutSec) ? Math.max(1, parseTimeoutSec) : defaults.parseTimeoutSec,
-            totalTimeoutSec: Number.isFinite(totalTimeoutSec) ? Math.max(1, totalTimeoutSec) : defaults.totalTimeoutSec
+            topN: getNum(parsed.topN, 1, 200, defaults.topN),
+            parseTimeoutSec: getNum(parsed.parseTimeoutSec, 1, 300, defaults.parseTimeoutSec),
+            totalTimeoutSec: getNum(parsed.totalTimeoutSec, 1, 3600, defaults.totalTimeoutSec)
         };
     } catch { return defaults; }
 }
@@ -1128,25 +1292,37 @@ function getColo(ip) {
         const isV6 = ip.includes(':');
         const urlIp = isV6 ? `[${ip}]` : ip; 
         const headers = { 'Host': 'speed.cloudflare.com', 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' };
-        const probes = [
-            { mod: http, url: `http://${urlIp}/cdn-cgi/trace`, opts: { timeout: 3000, headers } },
-            { mod: https, url: `https://${urlIp}/cdn-cgi/trace`, opts: { timeout: 3500, headers, rejectUnauthorized: false, servername: 'speed.cloudflare.com' } }
-        ];
-        let idx = 0;
-        const runProbe = () => {
-            if (idx >= probes.length) return resolve('❓ 测速节点');
-            const current = probes[idx++];
-            const req = current.mod.get(current.url, current.opts, (res) => {
-                let data = ''; res.on('data', (c) => data += c);
+        
+        let resolved = false;
+        let pending = 2;
+        
+        const done = (result) => {
+            if (resolved) return;
+            if (result) {
+                resolved = true;
+                resolve(result);
+            } else {
+                pending--;
+                if (pending === 0) resolve('❓ 超时/失败');
+            }
+        };
+
+        const makeReq = (mod, url, opts) => {
+            const req = mod.get(url, opts, (res) => {
+                let data = ''; 
+                res.on('data', (c) => data += c);
                 res.on('end', () => {
                     const match = data.match(/colo=([A-Z]+)/);
-                    if (match && match[1]) resolve(cfColoMap[match[1]] || `🌐 ${match[1]}`); else runProbe();
+                    if (match && match[1]) done(cfColoMap[match[1]] || `🌐 ${match[1]}`); 
+                    else done(null);
                 });
             });
-            req.on('error', () => runProbe());
-            req.on('timeout', () => { try { req.destroy(); } catch {} runProbe(); });
+            req.on('error', () => done(null));
+            req.on('timeout', () => { try { req.destroy(); } catch {} done(null); });
         };
-        runProbe();
+
+        makeReq(http, `http://${urlIp}/cdn-cgi/trace`, { timeout: 2000, headers });
+        makeReq(https, `https://${urlIp}/cdn-cgi/trace`, { timeout: 2500, headers, rejectUnauthorized: false, servername: 'speed.cloudflare.com' });
     });
 }
 
@@ -1157,7 +1333,7 @@ async function getColoCached(ip) {
     const now = Date.now();
     if (cache && cache.expireAt > now) return cache.region;
     const region = await getColo(key);
-    coloCache.set(key, { region, expireAt: now + (region.includes('超时') ? 90000 : 1800000) });
+    coloCache.set(key, { region, expireAt: now + (region.includes('超时') || region.includes('失败') || region.includes('未知') ? 60000 : 86400000) });
     return region;
 }
 
@@ -1309,6 +1485,8 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
     if (cfstConfig.allip) args.push('-allip');
     if (cfstConfig.debug) args.push('-debug');
 
+    args.push('-o', `result_${taskId}.csv`);
+
     let inputIps = null;
     if (rawTargets.length > 0) {
         sendProgress(taskId, { state: 'running', phase: '解析目标', message: `解析 ${rawTargets.length} 个目标...` });
@@ -1320,8 +1498,9 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
         let finalIps = [...new Set(resolvedIps)];
         if (incrementalDownOnly) finalIps = finalIps.filter(ip => dbData.test_history[ip]?.length >= 2 && dbData.test_history[ip][dbData.test_history[ip].length-1].speed < dbData.test_history[ip][dbData.test_history[ip].length-2].speed - 3) || finalIps;
         inputIps = new Set(finalIps);
-        // cfst 如果是 IPv6 会在命令行自动识别，但由于逗号分割可能解析异常，这里通过参数传递
-        args.push('-ip', finalIps.join(','), '-url', cfstConfig.url, '-dt', String(cfstConfig.dt), '-dn', String(finalIps.length <= 1 ? cfstConfig.dnSingle : cfstConfig.dn));
+        // cfst 如果是 IPv6 会在命令行自动识别，但由于逗号分割可能解析异常，并且 Android Termux 下参数长度受限容易导致 E2BIG 错误，这里改用文件传递
+        fs.writeFileSync(path.join(__dirname, `ip_${taskId}.txt`), finalIps.join('\n'), 'utf-8');
+        args.push('-f', `ip_${taskId}.txt`, '-url', cfstConfig.url, '-dt', String(cfstConfig.dt), '-dn', String(finalIps.length <= 1 ? cfstConfig.dnSingle : cfstConfig.dn));
     } else {
         args.push('-url', cfstConfig.url, '-dt', String(cfstConfig.dt), '-dn', String(cfstConfig.dn));
     }
@@ -1329,6 +1508,8 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
     let replied = false;
     const finish = (code, msg, phase, data = null) => {
         if (replied) return; replied = true;
+        try { fs.unlinkSync(path.join(__dirname, `ip_${taskId}.txt`)); } catch (e) {}
+        try { fs.unlinkSync(path.join(__dirname, `result_${taskId}.csv`)); } catch (e) {}
         sendProgress(taskId, { state: data ? 'done' : 'error', phase, message: msg, percent: 100 });
         closeProgress(taskId);
         res.status(code).json({ success: !!data, msg, data });
@@ -1350,7 +1531,7 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
         if (replied) return;
         if (code !== 0) return finish(500, `引擎异常退出(${code})`, '执行失败');
 
-        const csvPath = path.join(__dirname, 'result.csv');
+        const csvPath = path.join(__dirname, `result_${taskId}.csv`);
         if (!fs.existsSync(csvPath)) return finish(500, '未找到结果文件', '解析失败');
         
         sendProgress(taskId, { state: 'running', phase: '结果解析', message: '正在解析...' });
@@ -1364,7 +1545,16 @@ app.post('/api/start-test', upload.single('csvFile'), async (req, res) => {
         
         const pending = [];
         top.forEach(i => { if (i.csvColo && i.csvColo !== '0.00' && i.csvColo !== 'N/A') i.region = cfColoMap[i.csvColo] || `🌐 ${i.csvColo}`; else { i.region = '⏳'; pending.push(i.ip); } });
-        if (pending.length) mapWithConcurrency([...new Set(pending)], 4, async ip => await getColoCached(ip)).catch(()=>{});
+        
+        if (pending.length > 0) {
+            sendProgress(taskId, { state: 'running', phase: '地区识别', message: `正在补充获取 ${pending.length} 个节点的地区...` });
+            await mapWithConcurrency([...new Set(pending)], 20, async ip => {
+                const region = await getColoCached(ip);
+                top.forEach(item => {
+                    if (item.ip === ip) item.region = region;
+                });
+            });
+        }
         
         await saveHistory(top);
         finish(200, `完成，${top.length}个节点`, '完成', top);

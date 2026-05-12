@@ -148,6 +148,11 @@
         .progress-track { flex: 1; height: 8px; background: var(--border-color); border-radius: var(--radius-full); overflow: hidden; }
         .progress-fill { width: 0%; height: 100%; background: linear-gradient(90deg, var(--primary), var(--info)); transition: width 0.3s ease; }
         .progress-label { font-size: 0.8rem; font-weight: 700; color: var(--primary); min-width: 35px; text-align: right; }
+        
+        .status-details { margin-top: 0.5rem; padding: 1rem; background: var(--input-bg); border-radius: var(--radius-md); display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem; }
+        .detail-row { display: flex; align-items: center; gap: 0.5rem; }
+        .detail-label { font-size: 0.85rem; color: var(--text-tertiary); font-weight: 500; }
+        .detail-value { font-size: 0.9rem; color: var(--text-primary); font-weight: 600; font-family: "JetBrains Mono", ui-monospace, Menlo, Monaco, monospace; }
 
         .history-panel { border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--input-bg); overflow: hidden; }
         .history-item { padding: 0.8rem 1rem; font-size: 0.85rem; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; }
@@ -228,71 +233,7 @@
                     <button id="import-csv-btn" class="tool-btn primary">📁 导入 CSV 提取IP</button>
                 </div>
                 <div class="source-fetch">
-                    <select id="source-url-preset">
-                        <option value="custom">拉取源预设（自定义）</option>
-                        <optgroup label="Gslege（早中晚更新）">
-                            <option value="https://bestcf.pages.dev/gslege/Cfxyz.txt">Gslege - 带测速</option>
-                            <option value="https://bestcf.pages.dev/gslege/SG.txt">Gslege - 新加坡 SG</option>
-                            <option value="https://bestcf.pages.dev/gslege/DE.txt">Gslege - 德国 DE</option>
-                            <option value="https://bestcf.pages.dev/gslege/US.txt">Gslege - 美国 US</option>
-                            <option value="https://bestcf.pages.dev/gslege/NL.txt">Gslege - 荷兰 NL</option>
-                            <option value="https://bestcf.pages.dev/gslege/JP.txt">Gslege - 日本 JP</option>
-                        </optgroup>
-                        <optgroup label="天诚（暂时断更）">
-                            <option value="https://raw.githubusercontent.com/gshtwy/CF-DNS-Clone/refs/heads/main/wetest-cloudflare-v4.txt">天诚 - 临时过渡</option>
-                            <option value="https://bestcf.pages.dev/tiancheng/all.txt">天诚 - 多地区全量版</option>
-                            <option value="https://bestcf.pages.dev/tiancheng/mini.txt">天诚 - 多地区迷你版</option>
-                            <option value="https://bestcf.pages.dev/tiancheng/hk.txt">天诚 - 中国香港 HK</option>
-                            <option value="https://bestcf.pages.dev/tiancheng/sg.txt">天诚 - 新加坡 SG</option>
-                            <option value="https://bestcf.pages.dev/tiancheng/jp.txt">天诚 - 日本 JP</option>
-                            <option value="https://bestcf.pages.dev/tiancheng/tw.txt">天诚 - 中国台湾 TW</option>
-                            <option value="https://bestcf.pages.dev/tiancheng/kr.txt">天诚 - 韩国 KR</option>
-                            <option value="https://bestcf.pages.dev/tiancheng/us.txt">天诚 - 美国 US</option>
-                        </optgroup>
-                        <optgroup label="Xinyitang（每半小时更新）">
-                            <option value="https://bestcf.pages.dev/xinyitang3/ipv4.txt">Xinyitang - IPv4</option>
-                        </optgroup>
-                        <optgroup label="WeTest（每半小时更新 / 分三网）">
-                            <option value="https://bestcf.pages.dev/wetest/ipv4.txt">WeTest - IPv4</option>
-                        </optgroup>
-                        <optgroup label="vvHan（每小时更新 / 分三网）">
-                            <option value="https://bestcf.pages.dev/vvhan/ipv4.txt">vvHan - IPv4</option>
-                            <option value="https://bestcf.pages.dev/vvhan/ipv6.txt">vvHan - IPv6</option>
-                        </optgroup>
-                        <optgroup label="JZ（每半小时更新 / 联通）">
-                            <option value="https://raw.githubusercontent.com/HandsomeMJZ/cfip/refs/heads/main/best_ips.txt">JZ - TOP</option>
-                            <option value="https://raw.githubusercontent.com/HandsomeMJZ/cfip/refs/heads/main/full_ips.txt">JZ - All</option>
-                        </optgroup>
-                        <optgroup label="CM（每秒更新 / 随机优选）">
-                            <option value="https://090227.pages.dev/bestcf?isp=all&amp;ips=20">CM - 三网</option>
-                            <option value="https://090227.pages.dev/bestcf?isp=ct&amp;ips=50">CM - 电信</option>
-                            <option value="https://090227.pages.dev/bestcf?isp=cu&amp;ips=50">CM - 联通</option>
-                            <option value="https://090227.pages.dev/bestcf?isp=cmcc&amp;ips=50">CM - 移动</option>
-                        </optgroup>
-                        <optgroup label="NiREvil（每天下午更新 / 分三网）">
-                            <option value="https://bestcf.pages.dev/nirevil/ipv4.txt">NiREvil - IPv4</option>
-                            <option value="https://bestcf.pages.dev/nirevil/ipv6.txt">NiREvil - IPv6</option>
-                        </optgroup>
-                        <optgroup label="MingYu（每半小时更新）">
-                            <option value="https://bestcf.pages.dev/mingyu/ipv4.txt">MingYu - IPv4</option>
-                            <option value="https://bestcf.pages.dev/mingyu/ipv6.txt">MingYu - IPv6</option>
-                            <option value="https://bestcf.pages.dev/mingyu/ipv4-onlyip.txt">MingYu - IPv4 单IP列表</option>
-                        </optgroup>
-                        <optgroup label="ZhiXuan（每半小时更新 / 单IP列表）">
-                            <option value="https://bestcf.pages.dev/zhixuanwang/ipv4-onlyip.txt">ZhiXuan - IPv4 单IP列表</option>
-                        </optgroup>
-                        <optgroup label="SUB订阅（仅用于CM脚本）">
-                            <option value="sub://sub.cmliussss.net#CM">SUB - CMLiu</option>
-                            <option value="sub://owo.o00o.ooo#MR">SUB - Moist_R</option>
-                            <option value="sub://sub.xinyitang.dpdns.org#XYT">SUB - Xinyitang</option>
-                        </optgroup>
-                        <optgroup label="Anycast Entry IP（新手勿用）">
-                            <option value="https://bestcf.pages.dev/entryip/50.txt">Anycast Entry IP - 50.txt</option>
-                        </optgroup>
-                    </select>
-                    <input id="source-url-input" type="text" placeholder="预设拉取源 URL">
-                    <label class="input-toggle" style="margin-left: 0.25rem;"><input id="fetch-append" type="checkbox" checked> 累加</label>
-                    <button id="fetch-source-btn" class="tool-btn">🌐 拉取源</button>
+                    <button id="fetch-bestcf-all-btn" class="tool-btn primary">⚡ 拉取云端全部</button>
                 </div>
             </div>
 
@@ -304,6 +245,20 @@
                         <span id="status-tag" class="status-tag">RUN</span>
                     </div>
                     <div id="status-sub" class="status-sub">全速运转中，请耐心等待...</div>
+                    <div id="status-details" class="status-details hidden">
+                        <div class="detail-row">
+                            <span class="detail-label">当前 IP:</span>
+                            <span id="current-ip" class="detail-value">-</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">实时速度:</span>
+                            <span id="current-speed" class="detail-value">-</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="detail-label">平均速度:</span>
+                            <span id="avg-speed" class="detail-value">-</span>
+                        </div>
+                    </div>
                     <div class="progress-wrap">
                         <div class="progress-track"><div id="progress-fill" class="progress-fill"></div></div>
                         <span id="progress-label" class="progress-label">0%</span>
@@ -428,17 +383,6 @@
                 <div class="setting-actions">
                     <button id="save-settings-btn" class="tool-btn primary">💾 保存设置</button>
                     <button id="reset-settings-btn" class="tool-btn">↩︎ 恢复官方推荐</button>
-                </div>
-            </div>
-            
-            <div class="glass-card settings-area" style="margin-top: 1.5rem; margin-bottom: 0;">
-                <div class="setting-row">
-                    <label style="font-size: 1rem; color: #10b981;">系统维护 (本地控制台专属)</label>
-                    <div class="setting-hint">用于自动获取并更新底层的二进制引擎和官方 IP 段文本。</div>
-                </div>
-                <div class="setting-actions" style="margin-top: 0.5rem;">
-                    <button id="update-engine-btn" class="tool-btn" style="background: #ecfdf5; color: #059669; border-color: #a7f3d0;">🔄 升级 CFST 测速引擎</button>
-                    <button id="update-ips-btn" class="tool-btn" style="background: #f0fdfa; color: #0d9488; border-color: #99f6e4;">📥 更新官方 IP 库 (txt)</button>
                 </div>
             </div>
         </div>
