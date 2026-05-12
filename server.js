@@ -316,13 +316,26 @@ app.post('/api/system/fetch-bestcf', async (req, res) => {
         }
         
         // Markdown 链接格式：[标题](链接)
-        const linkRegex = /\[([^\]]*)\]\(([^)]+\.txt[^)]*)\)/g;
+        // 匹配：
+        // 1. .txt 结尾的链接
+        // 2. bestcf.pages.dev 下的链接
+        // 3. 090227.pages.dev 下的链接
+        const linkRegex = /\[([^\]]*)\]\(([^)]+)\)/g;
         let match;
         while ((match = linkRegex.exec(sectionMd)) !== null) {
             let title = match[1].trim();
             let url = match[2].trim();
             if (url.startsWith('/')) url = 'https://bestcf.pages.dev' + url;
             if (!url.startsWith('http')) continue;
+            
+            // 只保留：
+            // 1. 包含 .txt 的链接
+            // 2. bestcf.pages.dev 域名的链接
+            // 3. 090227.pages.dev 域名的链接
+            const isTxt = url.includes('.txt');
+            const isBestCf = url.includes('bestcf.pages.dev');
+            const is090227 = url.includes('090227.pages.dev');
+            if (!isTxt && !isBestCf && !is090227) continue;
             
             // 提取路径作为分组
             let groupName = '未分组';
@@ -331,6 +344,8 @@ app.post('/api/system/fetch-bestcf', async (req, res) => {
                 if (pathParts.length > 1) {
                     groupName = pathParts[0];
                 }
+            } else if (url.includes('090227.pages.dev')) {
+                groupName = 'CM (实时更新)';
             }
             
             // 如果标题为空，从文件名提取
@@ -347,15 +362,7 @@ app.post('/api/system/fetch-bestcf', async (req, res) => {
             extracted.push({ group: groupName, title, url });
         }
         
-        // 同时也提取一些常用的优选 API
-        const additionalSources = [
-            { group: 'CM (实时更新)', title: '三网 200', url: 'https://090227.pages.dev/bestcf?isp=all&ips=200' },
-            { group: 'CM (实时更新)', title: '电信 200', url: 'https://090227.pages.dev/bestcf?isp=ct&ips=200' },
-            { group: 'CM (实时更新)', title: '联通 200', url: 'https://090227.pages.dev/bestcf?isp=cu&ips=200' },
-            { group: 'CM (实时更新)', title: '移动 200', url: 'https://090227.pages.dev/bestcf?isp=cmcc&ips=200' }
-        ];
-        
-        const allSources = [...extracted, ...additionalSources];
+        const allSources = extracted;
         
         if (allSources.length === 0) {
             return res.json({ success: false, msg: '未能找到 txt 链接' });
