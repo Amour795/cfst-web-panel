@@ -298,78 +298,47 @@ app.post('/api/system/update-ips', async (req, res) => {
 
 app.post('/api/system/fetch-bestcf', async (req, res) => {
     try {
-        const response = await fetch('https://bestcf.pages.dev/', {
-            headers: { 'User-Agent': 'cfst-web-panel/1.0' },
-            signal: AbortSignal.timeout(15000)
-        });
-        if (!response.ok) return res.json({ success: false, msg: `上游响应异常: ${response.status}` });
-        const html = await response.text();
-        
-        const extracted = [];
-        
-        // 提取 id="yxip" 区域
-        const yxipRegex = /id=["']yxip["'][^>]*>([\s\S]*?)(?:<\/section>|<\/div>\s*<div class="glass-card settings-area")/i;
-        const yxipMatch = html.match(yxipRegex);
-        const sectionHtml = yxipMatch ? yxipMatch[1] : '';
-        
-        if (!sectionHtml) {
-            return res.json({ success: false, msg: '未能在页面中找到 id="yxip" 区域' });
-        }
-        
-        // 按 group-card 拆分
-        const cards = sectionHtml.split(/class="group-card"/i);
-        cards.shift();
-        
-        for (const card of cards) {
-            let groupNameMatch = card.match(/class="group-name">([^<]*)</i);
-            let groupName = groupNameMatch ? groupNameMatch[1].replace(/<[^>]*>/g, '').trim() : '未分组';
-            
-            const linkRows = card.split(/class="link-row"/i);
-            linkRows.shift();
-            
-            for (const row of linkRows) {
-                let titleMatch = row.match(/class="item-title">([^<]*)</i);
-                
-                // 优先从 copy(this, 'url') 中提取
-                let urlMatch = row.match(/onclick="copy\(this,\s*['"]([^'"]+)['"]\)/i);
-                if (!urlMatch) urlMatch = row.match(/class="url-text">([^<]*)</i);
-                if (!urlMatch) urlMatch = row.match(/href=["']([^"'\s]+)["']/i);
-                
-                if (titleMatch && urlMatch) {
-                    let title = titleMatch[1].replace(/<[^>]*>/g, '').trim();
-                    let url = urlMatch[1].trim();
-                    if (url.startsWith('/')) url = 'https://bestcf.pages.dev' + url;
-                    if (!url.startsWith('http')) continue;
-                    
-                    // 只保留包含 .txt 或 bestcf.pages.dev 或 090227.pages.dev 的链接
-                    const isTxt = url.includes('.txt');
-                    const isBestCf = url.includes('bestcf.pages.dev');
-                    const is090227 = url.includes('090227.pages.dev');
-                    if (!isTxt && !isBestCf && !is090227) continue;
-                    
-                    extracted.push({ group: groupName, title, url });
-                }
-            }
-        }
-        
-        // 同时也添加 CM 的优选 API
-        const additionalSources = [
+        // 使用预定义的可靠源，不依赖页面解析
+        const predefinedSources = [
+            { group: 'Gslege (早中晚更新)', title: '带测速', url: 'https://bestcf.pages.dev/gslege/Cfxyz.txt' },
+            { group: 'Gslege (早中晚更新)', title: '新加坡 SG', url: 'https://bestcf.pages.dev/gslege/SG.txt' },
+            { group: 'Gslege (早中晚更新)', title: '德国 DE', url: 'https://bestcf.pages.dev/gslege/DE.txt' },
+            { group: 'Gslege (早中晚更新)', title: '美国 US', url: 'https://bestcf.pages.dev/gslege/US.txt' },
+            { group: 'Gslege (早中晚更新)', title: '荷兰 NL', url: 'https://bestcf.pages.dev/gslege/NL.txt' },
+            { group: 'Gslege (早中晚更新)', title: '日本 JP', url: 'https://bestcf.pages.dev/gslege/JP.txt' },
+            { group: '天诚 (多地区)', title: '多地区全量版', url: 'https://bestcf.pages.dev/tiancheng/all.txt' },
+            { group: '天诚 (多地区)', title: '多地区迷你版', url: 'https://bestcf.pages.dev/tiancheng/mini.txt' },
+            { group: '天诚 (多地区)', title: '中国香港 HK', url: 'https://bestcf.pages.dev/tiancheng/hk.txt' },
+            { group: '天诚 (多地区)', title: '新加坡 SG', url: 'https://bestcf.pages.dev/tiancheng/sg.txt' },
+            { group: '天诚 (多地区)', title: '日本 JP', url: 'https://bestcf.pages.dev/tiancheng/jp.txt' },
+            { group: '天诚 (多地区)', title: '中国台湾 TW', url: 'https://bestcf.pages.dev/tiancheng/tw.txt' },
+            { group: '天诚 (多地区)', title: '韩国 KR', url: 'https://bestcf.pages.dev/tiancheng/kr.txt' },
+            { group: '天诚 (多地区)', title: '美国 US', url: 'https://bestcf.pages.dev/tiancheng/us.txt' },
+            { group: '天诚 2 (多地区)', title: '多地区全量版', url: 'https://bestcf.pages.dev/tiancheng2/all.txt' },
+            { group: '天诚 2 (多地区)', title: '多地区迷你版', url: 'https://bestcf.pages.dev/tiancheng2/mini.txt' },
+            { group: '天诚 2 (多地区)', title: '中国香港 HK', url: 'https://bestcf.pages.dev/tiancheng2/hk.txt' },
+            { group: '天诚 2 (多地区)', title: '新加坡 SG', url: 'https://bestcf.pages.dev/tiancheng2/sg.txt' },
+            { group: '天诚 2 (多地区)', title: '美国 US', url: 'https://bestcf.pages.dev/tiancheng2/us.txt' },
+            { group: 'Mia (每半小时更新)', title: '老链接不变', url: 'https://bestcf.pages.dev/xinyitang3/ipv4.txt' },
+            { group: 'Mia (每半小时更新)', title: '备用链接', url: 'https://raw.githubusercontent.com/xinyitang3/extract_ips/refs/heads/master/ip.txt' },
+            { group: 'WeTest (每半小时更新)', title: '分三网', url: 'https://bestcf.pages.dev/wetest/ipv4.txt' },
+            { group: 'V2SSR (每半小时更新)', title: '三网带测速', url: 'https://bestcf.pages.dev/v2rayssr/all.txt' },
+            { group: 'MoistR (每日更新)', title: 'MIX', url: 'https://bestcf.pages.dev/moistr/all.txt' },
+            { group: 'vvHan (每小时更新)', title: 'IPv4', url: 'https://bestcf.pages.dev/vvhan/ipv4.txt' },
+            { group: 'NiREvil (每天更新)', title: 'IPv4', url: 'https://bestcf.pages.dev/nirevil/ipv4.txt' },
+            { group: 'MingYu (每半小时更新)', title: 'IPv4', url: 'https://bestcf.pages.dev/mingyu/ipv4.txt' },
+            { group: 'MingYu (每半小时更新)', title: 'IPv4 单IP', url: 'https://bestcf.pages.dev/mingyu/ipv4-onlyip.txt' },
+            { group: 'ZhiXuan (每半小时更新)', title: 'IPv4 单IP', url: 'https://bestcf.pages.dev/zhixuanwang/ipv4-onlyip.txt' },
             { group: 'CM (实时更新)', title: '三网 200', url: 'https://090227.pages.dev/bestcf?isp=all&ips=200' },
             { group: 'CM (实时更新)', title: '电信 200', url: 'https://090227.pages.dev/bestcf?isp=ct&ips=200' },
             { group: 'CM (实时更新)', title: '联通 200', url: 'https://090227.pages.dev/bestcf?isp=cu&ips=200' },
             { group: 'CM (实时更新)', title: '移动 200', url: 'https://090227.pages.dev/bestcf?isp=cmcc&ips=200' }
         ];
         
-        const allSources = [...extracted, ...additionalSources];
-        
-        if (allSources.length === 0) {
-            return res.json({ success: false, msg: '未能找到链接' });
-        }
-        
         // 去重
         const seen = new Set();
         const groupsMap = new Map();
-        for (const item of allSources) {
+        for (const item of predefinedSources) {
             const key = item.url.trim();
             if (seen.has(key)) continue;
             seen.add(key);
@@ -380,7 +349,7 @@ app.post('/api/system/fetch-bestcf', async (req, res) => {
         const grouped = Array.from(groupsMap.entries()).map(([group, items]) => ({ group, items }));
 
         await setSetting('bestcf_sources', JSON.stringify(grouped));
-        res.json({ success: true, count: allSources.length, data: grouped });
+        res.json({ success: true, count: predefinedSources.length, data: grouped });
     } catch (e) {
         res.json({ success: false, msg: '同步失败: ' + e.message });
     }
